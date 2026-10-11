@@ -215,15 +215,24 @@ async function runSearch() {
   }
 }
 
+const STOP_WORDS = new Set(
+  "a an and are as at be by do for from has have how in is it my of on or that the this to was what when where which who with".split(" "),
+);
+
 /** Wraps the query's words in <mark> wherever they occur in `text`. */
 function highlighted(text: string) {
   const node = el("div", "snippet");
-  const words = queryEl.value.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1);
+  // Filler words would light up half of every snippet, so they are left plain.
+  const words = queryEl.value
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w.toLowerCase()));
   if (!words.length) {
     node.textContent = text;
     return node;
   }
-  const pattern = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "giu");
+  // Whole words only: "the" must not match inside "clothes".
+  const alternatives = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(${alternatives})(?![\\p{L}\\p{N}])`, "giu");
   text.split(pattern).forEach((part, i) => node.append(i % 2 ? el("mark", undefined, part) : part));
   return node;
 }

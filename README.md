@@ -1,112 +1,116 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128.png" width="96" alt="FileDig icon" />
+
 # FileDig
 
-Local semantic file search for Windows. Type what you are looking for in plain language and
-FileDig finds matching text files, PDFs and images by meaning, not just by file name.
+**Find your files by what they contain, not what they are called.**
 
-Everything runs on your machine: the model is [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)
-running through [llama.cpp](https://github.com/ggml-org/llama.cpp), on an NVIDIA GPU (CUDA) when one is
-present and on the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS.
+Local semantic search for documents and pictures on Windows. Nothing leaves your computer.
+
+![License](https://img.shields.io/badge/license-MIT-green)
+
+[Download](../../releases/latest) · [Features](#features) · [Getting started](#getting-started) · [Build from source](#build-from-source)
+
+<img src="docs/screenshot.png" width="760" alt="FileDig showing search results" />
+
+</div>
+
+## About
+
+Type what you are looking for in plain language, such as *"how much is the rent"* or
+*"photo of a sunset"*, and FileDig finds the matching text files, PDFs and images by meaning.
+
+It runs [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) on your own machine
+through [llama.cpp](https://github.com/ggml-org/llama.cpp), using an NVIDIA GPU when one is
+available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS.
 
 ## Features
 
-- **Semantic search** across text and images in one index: "how do I fix my wifi", "a red circle",
-  "scanned bill with a total amount".
-- **Exact-match search** for codes, names and numbers, merged with the semantic results.
-- **PDF results point to the page** that matched.
-- **Filters** for All, Documents or Images.
-- **Incremental indexing**: only new or changed files are processed on a rescan.
-- **Stop and resume**: indexing can be stopped at any time. A banner warns while a folder is not
-  fully indexed, and the Folders panel shows how many files are still waiting.
-- **Tray app** with a global hotkey. Closing the window keeps it running in the tray.
-- **Frees VRAM when idle**: the model unloads after 5 minutes without use and reloads on the next search.
-- **Read-only**: it never changes, moves or uploads your files.
+- 🔎 **Search by meaning** across text and images in one index
+- 🎯 **Exact-match search** for names, codes and numbers, merged with the semantic results
+- 📄 **PDF results open at the page** that matched
+- 🖼️ **Image search** by what a picture shows, with a thumbnail grid
+- ⚡ **GPU acceleration** on NVIDIA cards, with automatic CPU fallback
+- 🔄 **Incremental indexing** that only processes new or changed files
+- ⏸️ **Stop and resume** indexing at any time, with a warning while a folder is incomplete
+- ⌨️ **Global hotkey** (`Ctrl+Shift+Space`) and a tray icon
+- 🔒 **Private and read-only**: files are never changed, moved or uploaded
+- 📦 **Portable**: runs from a folder with no installation
 
 ### Supported files
 
 | Kind | Extensions |
 |---|---|
-| Text | txt, md, markdown, rst, log, csv, html, htm, docx |
-| PDF | pdf (text layer, per page) |
-| Images | jpg, jpeg, png, webp, bmp, gif |
+| Text | `txt` `md` `markdown` `rst` `log` `csv` `html` `htm` `docx` |
+| PDF | `pdf` (text layer, indexed per page) |
+| Images | `jpg` `jpeg` `png` `webp` `bmp` `gif` |
 
-## Requirements
+## Getting started
 
-- Windows 10/11 x64 (WebView2, included with Windows 11)
-- For GPU: an NVIDIA card with a recent driver. The model uses about 3.6 GB of VRAM while loaded.
-- To build: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) and [pnpm](https://pnpm.io)
+### Requirements
 
-## Setup
+- 64-bit Windows 10 or 11 (the WebView2 runtime is part of Windows 11 and up-to-date Windows 10)
+- About 1 GB of free disk space for the model
+- Optional: an NVIDIA graphics card with a recent driver and about 4 GB of free VRAM
 
-### 1. Install dependencies
+### Install
 
-```
-pnpm install
-```
+1. Download `FileDig-lite.zip` from the [latest release](../../releases/latest).
+2. Unzip it anywhere and run `FileDig.exe`.
+3. Click **Download model** on the start screen. This is a one-time download of about 825 MB.
+4. Click **Folders**, then **Add folder**, or drag a folder into the window.
 
-### 2. Create the `runtime` folder
+Indexing starts straight away, and you can search while it runs.
 
-`runtime/` holds the llama.cpp binaries and the model. It is not in git (about 1.5 GB).
+### Turn on GPU acceleration
 
-```
-runtime/
-  llama-cuda/    llama-server.exe + DLLs (CUDA build, plus the cudart DLLs)
-  llama-cpu/     llama-server.exe + DLLs (CPU build)
-  models/
-    embeddinggemma-2-Q8_0.gguf
-    mmproj-embeddinggemma-2-Q8_0.gguf
-```
+On a PC with an NVIDIA card, open **Settings** (the gear next to **Folders**) and choose
+**Download GPU support** (about 626 MB). Indexing becomes several times faster, and the existing
+index keeps working.
 
-**llama.cpp** (build b11552 or later, which includes EmbeddingGemma 2 support), from the
-[releases page](https://github.com/ggml-org/llama.cpp/releases):
+Only an up-to-date NVIDIA driver is needed. The CUDA toolkit is not.
 
-- `llama-<build>-bin-win-cuda-12.4-x64.zip` and `cudart-llama-bin-win-cuda-12.4-x64.zip`,
-  both extracted into `runtime/llama-cuda/`
-- `llama-<build>-bin-win-cpu-x64.zip`, extracted into `runtime/llama-cpu/`
+## Usage
 
-Only one of the two folders is required. With both present, CUDA is used when an NVIDIA GPU is
-detected and CPU is the fallback.
+| Key | Action |
+|---|---|
+| `Ctrl+Shift+Space` | Show or hide the window from anywhere |
+| `↑` `↓` | Move the selection |
+| `Enter` | Open the selected file |
+| `Ctrl+Enter` | Show the file in Explorer |
+| `Esc` | Hide the window |
 
-**Model files**, from [ggml-org/embeddinggemma-2-GGUF](https://huggingface.co/ggml-org/embeddinggemma-2-GGUF):
+- **Tabs** switch between All, Documents and Images.
+- **Exact match** marks results that contain every word you typed.
+- **Rescan**, in the Folders panel, picks up files added, changed or deleted since the last pass.
+  A rescan also runs each time the app starts.
+- Closing the window keeps FileDig in the tray. To quit, right-click the tray icon and choose **Quit**.
 
-```
-curl -L -C - -o runtime/models/embeddinggemma-2-Q8_0.gguf https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/embeddinggemma-2-Q8_0.gguf
-curl -L -C - -o runtime/models/mmproj-embeddinggemma-2-Q8_0.gguf https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/mmproj-embeddinggemma-2-Q8_0.gguf
-```
+## Privacy
 
-`-C -` resumes a partial download if the connection drops; rerun the command until it completes.
+Searching and indexing never leave your computer. The only network requests FileDig makes are the
+two optional downloads you start yourself: the model from Hugging Face and GPU support from the
+llama.cpp releases on GitHub. Both are pinned to exact versions and verified by SHA-256 before use.
 
-To keep the runtime somewhere else, set the `FILEDIG_RUNTIME` environment variable to its path.
+There is no account, no telemetry and no update check.
 
-Other optional environment variables:
+## Performance
 
-- `FILEDIG_DATA`: folder for the index, instead of the per-user app data folder.
-- `FILEDIG_INDEX_THREADS`: how many files are read at once while indexing (default: half the logical cores, at most 8).
+Measured on an RTX 3060 12 GB with a Core i7-12700:
 
-### 3. Run
+| | GPU (CUDA) | CPU |
+|---|---|---|
+| Search | 50–80 ms | not measured |
+| Indexing photos (about 3.5 MB each) | about 7 per second | about 1 per second |
 
-```
-pnpm tauri dev
-```
+The model unloads after 5 minutes without use to free VRAM, and reloads in a few seconds on the
+next search.
 
-To build a release executable:
+<details>
+<summary><b>Installing the model and GPU support by hand</b></summary>
 
-```
-pnpm tauri build
-```
-
-The built app looks for `runtime/` next to the executable or in any parent folder.
-
-## Downloads inside the app
-
-When the model is not present, FileDig offers to download it on first run (about 825 MB, once).
-On a PC with an NVIDIA graphics card, **Settings** (the gear in the status bar) offers
-**Download GPU support** (about 626 MB), which makes indexing several times faster.
-
-Both downloads are pinned to exact versions, resume if interrupted, and are verified by SHA-256
-before use. They are stored under `runtime` in the app's data folder. These are the only network
-requests the app makes; searching and indexing never leave the computer.
-
-## Installing the model and GPU support by hand
+<br>
 
 The in-app downloads are a convenience, not a requirement. If the files are already in place,
 FileDig uses them and never offers the download. This suits offline PCs and slow connections:
@@ -119,7 +123,7 @@ FileDig looks in two `runtime` folders, in this order:
 2. Beside the executable: the `runtime` folder next to `FileDig.exe`, or the folder named by
    `FILEDIG_RUNTIME`.
 
-Either location works, and the parts can be split between them. The layout is:
+Either location works, and the parts can be split between them.
 
 ```
 runtime\
@@ -147,82 +151,88 @@ Things to get right:
 - Files go directly in the folder, not in a subfolder created by the unzip tool.
 - Use llama.cpp build `b11552` or later; earlier builds do not support this model. Pair the
   CUDA 12.4 zip with the 12.4 cudart zip.
-- An up-to-date NVIDIA driver is the only NVIDIA software needed. The CUDA toolkit is not.
 - Restart FileDig afterwards so it picks up the new files.
 - Files placed by hand are not checksum-verified. A truncated download shows up as the model
   failing to start; the reason is in `llama-cuda.log` or `llama-cpu.log` in the data folder.
 
-## Portable build
+</details>
 
-```
-pwsh scripts\package-portable.ps1          # GPU (CUDA) + CPU
-pwsh scripts\package-portable.ps1 -CpuOnly # CPU only, much smaller
-pwsh scripts\package-portable.ps1 -Lite    # about 60 MB: the model is downloaded on first run
-pwsh scripts\package-portable.ps1 -Zip     # also write a .zip
-```
+## Build from source
 
-This writes `dist-portable\FileDig\`, a folder that runs from anywhere without installation:
+You need [Rust](https://rustup.rs), [Node.js](https://nodejs.org) and [pnpm](https://pnpm.io).
 
-```
-FileDig\
-  FileDig.exe
-  runtime\     llama.cpp server and the model
-  data\        index, logs and browser profile (created empty)
+```sh
+git clone <this repository>
+cd filedig
+pnpm install
+pnpm tauri dev
 ```
 
-The app is portable whenever a `data` folder sits beside the executable: everything it writes goes
-there instead of `%APPDATA%`. It needs the Microsoft Edge WebView2 Runtime, which is part of
-Windows 11 and of up-to-date Windows 10. Indexed folders are stored by full path, so on another PC
-they have to be added again.
+The app offers to download the model on first run. To use files you already have, place a
+`runtime` folder in the project root, laid out as described in
+*Installing the model and GPU support by hand* above.
 
-## Usage
+### Portable packages
 
-1. Click **Folders**, then **Add folder** and pick a folder, or drag a folder into the window. Indexing starts immediately and the
-   status bar shows progress.
-2. Type a query. Results update as you type.
-3. Click **Stop** in the banner to interrupt indexing; files already indexed stay searchable.
-   **Resume indexing** continues where it left off.
-4. Use **Rescan** to pick up files added, changed or deleted since the last pass. A rescan also
-   runs every time the app starts.
+```powershell
+pwsh scripts\package-portable.ps1 -Lite -Zip   # about 25 MB; model downloaded on first run
+pwsh scripts\package-portable.ps1 -CpuOnly     # model included, CPU backend
+pwsh scripts\package-portable.ps1              # model, CPU and GPU backends (about 2 GB)
+```
 
-| Key | Action |
+Packages are written to `dist-portable\`. A copy is portable whenever a `data` folder sits beside
+the executable: the index, logs and downloads then go there instead of `%APPDATA%`.
+
+### Configuration
+
+| Environment variable | Purpose |
 |---|---|
-| Ctrl+Shift+Space | Show or hide the window from anywhere |
-| Up / Down | Move the selection |
-| Enter | Open the selected file |
-| Ctrl+Enter or Ctrl+click | Show the file in Explorer |
-| Esc | Hide the window |
+| `FILEDIG_RUNTIME` | Folder holding the model and llama.cpp builds |
+| `FILEDIG_DATA` | Folder for the index, instead of the per-user data folder |
+| `FILEDIG_INDEX_THREADS` | Files read at once while indexing (default: half the logical cores, at most 8) |
 
-To quit, right-click the tray icon and choose **Quit**.
+## How it works
 
-Each result shows a similarity score between 0 and 1. Results marked **exact match** contain every
-word of the query.
+```
+ folders ──► indexer ──► llama-server ──► SQLite ◄── search ◄── query
+             (Rust)      (EmbeddingGemma 2)  (vectors, text,      (Rust)
+                                              keyword index)
+```
 
-## Performance
+- **Indexer** (`src-tauri/src/indexer.rs`): walks the folders, splits text into overlapping
+  passages of about 1,200 characters, extracts PDF text page by page, and downsizes images before
+  embedding. Files are read on several CPU cores while the model works on the GPU.
+- **Engine** (`src-tauri/src/engine.rs`): runs `llama-server` as a hidden helper on a free local
+  port. Text and images are embedded into the same 768-dimensional space, so a text query can
+  match either.
+- **Storage** (`src-tauri/src/db.rs`): one SQLite file holds the files, passages, vectors,
+  thumbnails and an FTS5 keyword index. Vectors are compared by brute force in memory.
+- **Search** (`src-tauri/src/lib.rs`): the semantic and keyword rankings are merged with
+  reciprocal rank fusion, and the best passage per file is shown.
+- **Downloads** (`src-tauri/src/setup.rs`): fetches the model and GPU backend with resume and
+  checksum verification.
+- **UI** (`src/`): plain TypeScript and CSS, built with Vite.
 
-Measured on an RTX 3060 12 GB and a Core i7-12700:
-
-| | CUDA | CPU |
-|---|---|---|
-| Query | 50–80 ms | not measured end to end |
-| Embedding one image | not measured separately | about 1.1 s |
-| Embedding one text passage | not measured separately | about 0.26 s |
-| Model load | a few seconds | not measured |
-
-Indexing a test folder of 8 files (9 passages and images) took about 7 s on CUDA, including model load.
+The index is stored at `%APPDATA%\com.rupesh.filedig\index.db`. Deleting that file resets it.
 
 ## Limitations
 
-- No live file watching yet: changes are picked up on startup or with **Rescan**.
+- Windows only for now.
+- No live file watching: changes are picked up on startup or with **Rescan**.
 - Scanned PDFs without a text layer are skipped, and there is no OCR for screenshots.
 - Audio, video and source code are not indexed.
-- In the **All** view, image and text scores sit on slightly different scales, so an unrelated image
-  can outrank a weak text match. The Documents and Images filters avoid this.
-- No installer: the `runtime` folder has to be placed by hand.
-- Size limits: text files over 5 MB, images over 50 MB and PDFs over 100 MB are skipped.
+- Results are limited to the top 48 matches.
+- Text files over 5 MB, images over 50 MB and PDFs over 100 MB are skipped.
+- Tested with libraries of a few hundred files. Very large libraries (hundreds of thousands of
+  items) will use a lot of memory, because every vector is held in RAM.
+
+## Acknowledgements
+
+- [DigUp](https://github.com/ARahim3/DigUp), the macOS app that inspired this one
+- [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) by Google DeepMind (Apache 2.0)
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT)
+- [Tauri](https://tauri.app) (MIT / Apache 2.0)
 
 ## License
 
-FileDig is released under the [MIT License](LICENSE).
-
-The components it runs are licensed separately: EmbeddingGemma 2 under Apache 2.0 and llama.cpp under MIT.
+[MIT](LICENSE) © 2026 Rupesh Sreeraman
