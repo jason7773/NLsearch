@@ -6,7 +6,7 @@
 
 **Find your files by what they contain, not what they are called.**
 
-Local semantic search for documents and pictures on Windows/Linux. Nothing leaves your computer.
+Local semantic search for documents and pictures on Windows. Nothing leaves your computer.
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 

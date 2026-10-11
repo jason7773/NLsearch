@@ -57,6 +57,7 @@ const ICONS: Record<string, string> = {
   refresh: svg('<path d="M20 11a8 8 0 0 0-14.3-4.3L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 14.3 4.3l1.7-1.8M20 20v-4.5h-4.5"/>'),
   gear: svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
   download: svg('<path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/>'),
+  bolt: svg('<path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z"/>'),
   info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.3"/>'),
   warn: svg('<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.3"/>'),
   trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),
@@ -144,17 +145,34 @@ function toast(text: string, isError = false) {
 function showIdle() {
   hits = [];
   if (setup && !setup.model_installed) {
-    const get = el("button", "accent", `Download model (${megabytes(setup.model_size)})`);
-    get.prepend(icon("download"));
-    get.addEventListener("click", () => {
+    const offerGpu = setup.gpu_supported && !setup.gpu_installed;
+    const begin = (withGpu: boolean) => () => {
+      gpuQueued = withGpu;
       openSettings();
       startDownload("model");
-    });
+    };
+    const get = el(
+      "button",
+      "accent",
+      offerGpu
+        ? `Download model and GPU support (${megabytes(setup.model_size + setup.gpu_size)})`
+        : `Download model (${megabytes(setup.model_size)})`,
+    );
+    get.prepend(icon("download"));
+    get.addEventListener("click", begin(offerGpu));
+    const extra: HTMLElement[] = [get];
+    if (offerGpu) {
+      const modelOnly = el("button", "secondary", `Model only (${megabytes(setup.model_size)})`);
+      modelOnly.addEventListener("click", begin(false));
+      extra.push(modelOnly);
+    }
     emptyState(
       "download",
       "One download to get started",
-      "FileDig needs its search model. It is downloaded once and then runs entirely on this computer.",
-      get,
+      offerGpu
+        ? "FileDig needs its search model. An NVIDIA graphics card was found, so GPU support is included to make indexing several times faster. Everything runs on this computer."
+        : "FileDig needs its search model. It is downloaded once and then runs entirely on this computer.",
+      ...extra,
     );
     return;
   }
@@ -458,7 +476,9 @@ async function refreshStatus() {
 
   const backend = $("backend");
   backend.hidden = !s.backend;
-  backend.textContent = s.backend === "CUDA" ? "GPU" : s.backend;
+  const gpuAvailable = !!setup && setup.gpu_supported && !setup.gpu_installed;
+  backend.textContent = s.backend === "CUDA" ? "GPU" : gpuAvailable ? "CPU · GPU available" : s.backend;
+  backend.classList.toggle("link", s.backend !== "CUDA" && gpuAvailable);
   backend.classList.toggle("on", s.engine_loaded);
   backend.title = s.engine_loaded ? `Model loaded on ${s.backend}` : "Model unloaded; it reloads on the next search";
 
@@ -600,6 +620,8 @@ interface Setup {
 }
 
 let setup: Setup | null = null;
+/** GPU support was chosen together with the model: fetch it once the model is in. */
+let gpuQueued = false;
 let wasDownloading = false;
 
 const megabytes = (bytes: number) => `${Math.round(bytes / 1048576).toLocaleString()} MB`;
@@ -639,11 +661,22 @@ async function refreshSetup() {
 
   if (wasDownloading && !d.running && !d.error && !d.cancelled) {
     toast(d.component === "gpu" ? "GPU support is installed." : "The model is installed.");
+    if (d.component === "model" && gpuQueued) {
+      gpuQueued = false;
+      startDownload("gpu");
+    }
     // Folders added before the model arrived can be indexed now.
     if (d.component === "model") invoke("reindex");
     refreshStatus();
   }
   wasDownloading = d.running;
+  if (d.cancelled || d.error) gpuQueued = false;
+
+  // Tell people with an NVIDIA card that GPU support exists, until they take it or decline.
+  const tipWanted =
+    setup.model_installed && setup.gpu_supported && !setup.gpu_installed && !d.running && !gpuQueued && !tipDismissed();
+  $("tip").hidden = !tipWanted;
+  $("tip-action").textContent = `Download (${megabytes(setup.gpu_size)})`;
   if (hadModel !== setup.model_installed && !queryEl.value.trim()) showIdle();
 }
 
@@ -655,6 +688,32 @@ async function startDownload(component: "gpu" | "model") {
   }
   refreshSetup();
 }
+
+/** The GPU tip stays hidden once declined; the option remains in Settings. */
+function tipDismissed() {
+  try {
+    return localStorage.getItem("gpuTipDismissed") === "1";
+  } catch {
+    return false;
+  }
+}
+
+$("tip-action").addEventListener("click", () => {
+  openSettings();
+  startDownload("gpu");
+});
+$("tip-dismiss").addEventListener("click", () => {
+  try {
+    localStorage.setItem("gpuTipDismissed", "1");
+  } catch {
+    // Without storage the tip simply returns next time.
+  }
+  $("tip").hidden = true;
+});
+// The status bar's CPU label leads to the GPU option when one is available.
+$("backend").addEventListener("click", () => {
+  if ($("backend").classList.contains("link")) openSettings();
+});
 
 function openSettings() {
   refreshSetup();

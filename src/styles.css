@@ -977,3 +977,44 @@ dialog section p {
 dialog p.error {
   color: var(--critical);
 }
+
+/* Tip offering GPU support to people whose PC can use it */
+
+#tip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 6px 6px 6px 14px;
+  font-size: 13px;
+  background: var(--fill);
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+}
+
+#tip > .icon {
+  color: var(--accent);
+}
+
+#tip-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#tip button {
+  flex: none;
+  height: 28px;
+}
+
+#tip button.subtle {
+  width: 28px;
+}
+
+#backend.link {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.empty .secondary {
+  margin-top: 4px;
+}
