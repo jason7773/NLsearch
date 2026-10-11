@@ -41,20 +41,19 @@ impl Drop for Engine {
 }
 
 impl Engine {
-    pub fn start(runtime: &Path, log_dir: &Path) -> Result<Engine> {
-        let models = runtime.join("models");
-        let model = models.join(MODEL_FILE);
-        let mmproj = models.join(MMPROJ_FILE);
-        for f in [&model, &mmproj] {
-            if !f.exists() {
-                bail!("model file missing: {}", f.display());
-            }
-        }
+    /// `roots` are the runtime folders to look in, in order: downloaded parts first,
+    /// then what shipped with the app.
+    pub fn start(roots: &[PathBuf], log_dir: &Path) -> Result<Engine> {
+        let find = |file: &str| {
+            locate(roots, &format!("models/{file}")).with_context(|| format!("model file missing: {file}"))
+        };
+        let model = find(MODEL_FILE)?;
+        let mmproj = find(MMPROJ_FILE)?;
 
         let mut errors = Vec::new();
         for (backend, dir, ngl) in [("CUDA", "llama-cuda", "99"), ("CPU", "llama-cpu", "0")] {
-            let exe = runtime.join(dir).join("llama-server.exe");
-            if !exe.exists() || (backend == "CUDA" && !has_cuda_device(&exe)) {
+            let Some(exe) = locate(roots, &format!("{dir}/llama-server.exe")) else { continue };
+            if backend == "CUDA" && !has_cuda_device(&exe) {
                 continue;
             }
             match spawn(&exe, &model, &mmproj, ngl, backend, log_dir) {
@@ -63,7 +62,7 @@ impl Engine {
             }
         }
         if errors.is_empty() {
-            bail!("no llama-server.exe found under {}", runtime.display());
+            bail!("no llama-server.exe found");
         }
         bail!("could not start llama-server ({})", errors.join("; "))
     }
@@ -116,6 +115,19 @@ impl Engine {
         }
         Ok(out)
     }
+}
+
+/// The first of `roots` that contains `relative`, as a full path.
+pub fn locate(roots: &[PathBuf], relative: &str) -> Option<PathBuf> {
+    roots.iter().map(|root| root.join(relative)).find(|path| path.exists())
+}
+
+pub fn model_installed(roots: &[PathBuf]) -> bool {
+    [MODEL_FILE, MMPROJ_FILE].iter().all(|f| locate(roots, &format!("models/{f}")).is_some())
+}
+
+pub fn gpu_backend_installed(roots: &[PathBuf]) -> bool {
+    locate(roots, "llama-cuda/llama-server.exe").is_some()
 }
 
 fn has_cuda_device(exe: &Path) -> bool {

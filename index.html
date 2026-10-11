@@ -26,6 +26,7 @@
         <button id="folders-toggle" title="Choose which folders are searched">
           <span class="icon" data-icon="folder"></span>Folders<span id="folder-count" hidden></span>
         </button>
+        <button id="settings-open" class="subtle" title="Settings"><span class="icon" data-icon="gear"></span></button>
       </div>
     </header>
 
@@ -64,6 +65,35 @@
       </dl>
       <div class="dialog-actions">
         <button id="about-close" class="accent">Close</button>
+      </div>
+    </dialog>
+
+    <dialog id="settings">
+      <h2>Settings</h2>
+
+      <section>
+        <h3>Graphics acceleration</h3>
+        <p id="gpu-state"></p>
+        <button id="gpu-action" class="accent" hidden></button>
+      </section>
+
+      <section>
+        <h3>Search model</h3>
+        <p id="model-state"></p>
+        <button id="model-action" class="accent" hidden></button>
+      </section>
+
+      <div id="download" hidden>
+        <div class="bar"><div id="download-fill"></div></div>
+        <div class="download-row">
+          <span id="download-text"></span>
+          <button id="download-cancel">Cancel</button>
+        </div>
+      </div>
+      <p id="download-error" class="error" hidden></p>
+
+      <div class="dialog-actions">
+        <button id="settings-close">Close</button>
       </div>
     </dialog>
 

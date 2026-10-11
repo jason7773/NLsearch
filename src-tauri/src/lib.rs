@@ -1,6 +1,7 @@
 mod db;
 mod engine;
 mod indexer;
+mod setup;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -38,7 +39,11 @@ pub struct Progress {
 
 pub struct AppState {
     pub db_path: PathBuf,
-    runtime: PathBuf,
+    /// Folders holding the model and llama.cpp builds: downloaded parts first (this
+    /// one is writable), then what shipped with the app.
+    pub runtimes: Vec<PathBuf>,
+    pub download: Mutex<setup::Download>,
+    pub download_cancel: AtomicBool,
     log_dir: PathBuf,
     engine: Mutex<Option<Arc<Engine>>>,
     last_used: Mutex<Instant>,
@@ -61,10 +66,15 @@ impl AppState {
         if let Some(engine) = slot.as_ref() {
             return Ok(engine.clone());
         }
-        let engine = Arc::new(Engine::start(&self.runtime, &self.log_dir)?);
+        let engine = Arc::new(Engine::start(&self.runtimes, &self.log_dir)?);
         *self.backend.lock().unwrap() = engine.backend.to_string();
         *slot = Some(engine.clone());
         Ok(engine)
+    }
+
+    /// Stops the helper so the next use starts it afresh, picking up a new backend.
+    pub fn restart_engine(&self) {
+        *self.engine.lock().unwrap() = None;
     }
 
     pub fn touch(&self) {
@@ -92,7 +102,7 @@ fn find_runtime() -> PathBuf {
     exe.ancestors()
         .skip(1)
         .map(|dir| dir.join("runtime"))
-        .find(|dir| dir.join("models").is_dir())
+        .find(|dir| dir.is_dir())
         .unwrap_or_else(|| exe.with_file_name("runtime"))
 }
 
@@ -140,6 +150,39 @@ fn status(state: State<AppState>) -> CmdResult<Status> {
         hotkey: HOTKEY,
         progress: state.progress.lock().unwrap().clone(),
     })
+}
+
+#[derive(Serialize)]
+struct Setup {
+    model_installed: bool,
+    model_size: u64,
+    gpu_installed: bool,
+    /// An NVIDIA driver is present, so the GPU backend would work here.
+    gpu_supported: bool,
+    gpu_size: u64,
+    download: setup::Download,
+}
+
+#[tauri::command(async)]
+fn setup_status(state: State<AppState>) -> Setup {
+    Setup {
+        model_installed: engine::model_installed(&state.runtimes),
+        model_size: setup::download_size("model"),
+        gpu_installed: engine::gpu_backend_installed(&state.runtimes),
+        gpu_supported: setup::nvidia_present(),
+        gpu_size: setup::download_size("gpu"),
+        download: state.download.lock().unwrap().clone(),
+    }
+}
+
+#[tauri::command]
+fn download_component(app: AppHandle, component: String) -> CmdResult<()> {
+    setup::start(app, component)
+}
+
+#[tauri::command]
+fn cancel_download(state: State<AppState>) {
+    state.download_cancel.store(true, Ordering::SeqCst);
 }
 
 #[derive(Serialize)]
@@ -446,7 +489,9 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             app.manage(AppState {
                 db_path: data_dir.join("index.db"),
-                runtime: find_runtime(),
+                runtimes: vec![data_dir.join("runtime"), find_runtime()],
+                download: Mutex::new(setup::Download::default()),
+                download_cancel: AtomicBool::new(false),
                 log_dir: data_dir,
                 engine: Mutex::new(None),
                 last_used: Mutex::new(Instant::now()),
@@ -518,6 +563,9 @@ pub fn run() {
             remove_folder,
             reindex,
             stop_indexing,
+            setup_status,
+            download_component,
+            cancel_download,
             search,
             open_file,
             reveal_file

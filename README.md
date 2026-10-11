@@ -96,11 +96,68 @@ pnpm tauri build
 
 The built app looks for `runtime/` next to the executable or in any parent folder.
 
+## Downloads inside the app
+
+When the model is not present, FileDig offers to download it on first run (about 825 MB, once).
+On a PC with an NVIDIA graphics card, **Settings** (the gear in the status bar) offers
+**Download GPU support** (about 626 MB), which makes indexing several times faster.
+
+Both downloads are pinned to exact versions, resume if interrupted, and are verified by SHA-256
+before use. They are stored under `runtime` in the app's data folder. These are the only network
+requests the app makes; searching and indexing never leave the computer.
+
+## Installing the model and GPU support by hand
+
+The in-app downloads are a convenience, not a requirement. If the files are already in place,
+FileDig uses them and never offers the download. This suits offline PCs and slow connections:
+download once on another machine and copy the `runtime` folder across.
+
+FileDig looks in two `runtime` folders, in this order:
+
+1. Inside the data folder: `%APPDATA%\com.rupesh.filedig\runtime` for an installed copy, or
+   `data\runtime` in a portable copy. The in-app downloads go here.
+2. Beside the executable: the `runtime` folder next to `FileDig.exe`, or the folder named by
+   `FILEDIG_RUNTIME`.
+
+Either location works, and the parts can be split between them. The layout is:
+
+```
+runtime\
+  llama-cuda\   llama-server.exe + all DLLs from the CUDA zip and the cudart zip
+  llama-cpu\    llama-server.exe + all DLLs from the CPU zip
+  models\
+    embeddinggemma-2-Q8_0.gguf
+    mmproj-embeddinggemma-2-Q8_0.gguf
+```
+
+Where to get the files:
+
+- **Model**: both `.gguf` files from
+  [ggml-org/embeddinggemma-2-GGUF](https://huggingface.co/ggml-org/embeddinggemma-2-GGUF).
+- **GPU support** (NVIDIA only): `llama-<build>-bin-win-cuda-12.4-x64.zip` and
+  `cudart-llama-bin-win-cuda-12.4-x64.zip` from the
+  [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases), both extracted into
+  `llama-cuda`.
+- **CPU backend**: `llama-<build>-bin-win-cpu-x64.zip` from the same page, extracted into
+  `llama-cpu`. The release packages already include it.
+
+Things to get right:
+
+- File and folder names must match exactly.
+- Files go directly in the folder, not in a subfolder created by the unzip tool.
+- Use llama.cpp build `b11552` or later; earlier builds do not support this model. Pair the
+  CUDA 12.4 zip with the 12.4 cudart zip.
+- An up-to-date NVIDIA driver is the only NVIDIA software needed. The CUDA toolkit is not.
+- Restart FileDig afterwards so it picks up the new files.
+- Files placed by hand are not checksum-verified. A truncated download shows up as the model
+  failing to start; the reason is in `llama-cuda.log` or `llama-cpu.log` in the data folder.
+
 ## Portable build
 
 ```
 pwsh scripts\package-portable.ps1          # GPU (CUDA) + CPU
 pwsh scripts\package-portable.ps1 -CpuOnly # CPU only, much smaller
+pwsh scripts\package-portable.ps1 -Lite    # about 60 MB: the model is downloaded on first run
 pwsh scripts\package-portable.ps1 -Zip     # also write a .zip
 ```
 
@@ -140,24 +197,6 @@ To quit, right-click the tray icon and choose **Quit**.
 
 Each result shows a similarity score between 0 and 1. Results marked **exact match** contain every
 word of the query.
-
-## How it works
-
-- **Engine** (`src-tauri/src/engine.rs`): starts `llama-server` as a hidden helper process on a free
-  local port and requests embeddings over HTTP. Text and images are embedded into the same
-  768-dimensional space, so a text query can match either. The helper is tied to the app with a
-  Windows job object, so it never outlives the app.
-- **Indexer** (`src-tauri/src/indexer.rs`): walks the folders, splits text into overlapping passages
-  of about 1,200 characters, extracts PDF text page by page, and downsizes images to 896 px before
-  embedding. Hidden folders and folders such as `node_modules` are skipped.
-- **Storage** (`src-tauri/src/db.rs`): one SQLite file holds the files, passages, vectors and an FTS5
-  keyword index. Vectors are searched by brute force in memory.
-- **Search** (`src-tauri/src/lib.rs`): the semantic and keyword rankings are merged with reciprocal
-  rank fusion, and the best passage per file is shown.
-- **UI** (`src/`): plain TypeScript and CSS, built with Vite.
-
-The index is stored at `%APPDATA%\com.rupesh.filedig\index.db`, with the llama.cpp logs beside it.
-Deleting that file resets the index.
 
 ## Performance
 

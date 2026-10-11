@@ -55,6 +55,8 @@ const ICONS: Record<string, string> = {
   folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   refresh: svg('<path d="M20 11a8 8 0 0 0-14.3-4.3L4 8.5M4 4v4.5h4.5M4 13a8 8 0 0 0 14.3 4.3l1.7-1.8M20 20v-4.5h-4.5"/>'),
+  gear: svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+  download: svg('<path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/>'),
   info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.3"/>'),
   warn: svg('<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.3"/>'),
   trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),
@@ -89,6 +91,7 @@ const foldersEl = $("folders");
 const drawer = $("drawer");
 const backdrop = $("backdrop");
 const about = $<HTMLDialogElement>("about");
+const settings = $<HTMLDialogElement>("settings");
 
 let filter = "all";
 let hits: Hit[] = [];
@@ -140,6 +143,21 @@ function toast(text: string, isError = false) {
 
 function showIdle() {
   hits = [];
+  if (setup && !setup.model_installed) {
+    const get = el("button", "accent", `Download model (${megabytes(setup.model_size)})`);
+    get.prepend(icon("download"));
+    get.addEventListener("click", () => {
+      openSettings();
+      startDownload("model");
+    });
+    emptyState(
+      "download",
+      "One download to get started",
+      "FileDig needs its search model. It is downloaded once and then runs entirely on this computer.",
+      get,
+    );
+    return;
+  }
   if (!folderCount) {
     const add = el("button", "accent", "Add folder");
     add.prepend(icon("plus"));
@@ -488,7 +506,7 @@ $("clear").addEventListener("click", () => {
 
 window.addEventListener("keydown", (e) => {
   // The dialog handles its own keys, including Esc to close.
-  if (about.open) return;
+  if (about.open || settings.open) return;
   if (e.key === "Escape") {
     if (drawer.classList.contains("open")) setDrawer(false);
     else getCurrentWindow().hide();
@@ -555,6 +573,98 @@ about.addEventListener("click", (e) => {
 });
 listen("show-about", showAbout);
 
+interface Setup {
+  model_installed: boolean;
+  model_size: number;
+  gpu_installed: boolean;
+  gpu_supported: boolean;
+  gpu_size: number;
+  download: {
+    component: string;
+    running: boolean;
+    done: number;
+    total: number;
+    step: string;
+    error: string | null;
+    cancelled: boolean;
+  };
+}
+
+let setup: Setup | null = null;
+let wasDownloading = false;
+
+const megabytes = (bytes: number) => `${Math.round(bytes / 1048576).toLocaleString()} MB`;
+
+/** Reads what is installed and any download in flight, and reflects it in Settings. */
+async function refreshSetup() {
+  const hadModel = setup?.model_installed;
+  setup = await invoke<Setup>("setup_status");
+  const d = setup.download;
+
+  $("gpu-state").textContent = setup.gpu_installed
+    ? "Installed. Searching and indexing use your NVIDIA graphics card."
+    : setup.gpu_supported
+      ? "An NVIDIA graphics card was found. Downloading GPU support makes indexing several times faster."
+      : "No NVIDIA graphics card was found, so FileDig runs on the processor.";
+  const gpuAction = $<HTMLButtonElement>("gpu-action");
+  gpuAction.hidden = setup.gpu_installed || !setup.gpu_supported;
+  gpuAction.textContent = `Download GPU support (${megabytes(setup.gpu_size)})`;
+  gpuAction.disabled = d.running;
+
+  $("model-state").textContent = setup.model_installed
+    ? "Installed: EmbeddingGemma 2 (8-bit)."
+    : "Not installed. FileDig cannot search until the model is downloaded.";
+  const modelAction = $<HTMLButtonElement>("model-action");
+  modelAction.hidden = setup.model_installed;
+  modelAction.textContent = `Download model (${megabytes(setup.model_size)})`;
+  modelAction.disabled = d.running;
+
+  $("download").hidden = !d.running;
+  if (d.running) {
+    $("download-fill").style.width = `${d.total ? (d.done / d.total) * 100 : 0}%`;
+    $("download-text").textContent = `${d.step} · ${megabytes(d.done)} of ${megabytes(d.total)}`;
+  }
+  const failed = $("download-error");
+  failed.hidden = d.running || !d.error;
+  failed.textContent = d.error ? `Download failed: ${d.error}. Try again to continue where it stopped.` : "";
+
+  if (wasDownloading && !d.running && !d.error && !d.cancelled) {
+    toast(d.component === "gpu" ? "GPU support is installed." : "The model is installed.");
+    // Folders added before the model arrived can be indexed now.
+    if (d.component === "model") invoke("reindex");
+    refreshStatus();
+  }
+  wasDownloading = d.running;
+  if (hadModel !== setup.model_installed && !queryEl.value.trim()) showIdle();
+}
+
+async function startDownload(component: "gpu" | "model") {
+  try {
+    await invoke("download_component", { component });
+  } catch (e) {
+    toast(String(e), true);
+  }
+  refreshSetup();
+}
+
+function openSettings() {
+  refreshSetup();
+  if (!settings.open) settings.showModal();
+}
+
+$("settings-open").addEventListener("click", openSettings);
+$("settings-close").addEventListener("click", () => settings.close());
+$("gpu-action").addEventListener("click", () => startDownload("gpu"));
+$("model-action").addEventListener("click", () => startDownload("model"));
+$("download-cancel").addEventListener("click", async () => {
+  await invoke("cancel_download");
+  refreshSetup();
+});
+// Keep the progress moving while a download runs or the dialog is open.
+setInterval(() => {
+  if (settings.open || setup?.download.running) refreshSetup();
+}, 700);
+
 getCurrentWebview().onDragDropEvent(({ payload }) => {
   $("drop").hidden = payload.type !== "enter" && payload.type !== "over";
   if (payload.type === "drop") addFolders(payload.paths);
@@ -567,6 +677,6 @@ getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   }
 });
 
-refreshFolders().then(showIdle);
+refreshSetup().then(refreshFolders).then(showIdle);
 refreshStatus();
 setInterval(refreshStatus, 1500);
