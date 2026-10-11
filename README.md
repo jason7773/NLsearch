@@ -6,7 +6,7 @@
 
 **Find your files by what they contain, not what they are called.**
 
-Local semantic search for documents and pictures on Windows. Nothing leaves your computer.
+Local semantic search for documents and pictures on Windows/Linux. Nothing leaves your computer.
 
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -193,10 +193,36 @@ the executable: the index, logs and downloads then go there instead of `%APPDATA
 
 ## How it works
 
-```
- folders ──► indexer ──► llama-server ──► SQLite ◄── search ◄── query
-             (Rust)      (EmbeddingGemma 2)  (vectors, text,      (Rust)
-                                              keyword index)
+```mermaid
+flowchart LR
+    Files[("Your folders<br/>documents and pictures")]
+
+    subgraph App["FileDig"]
+        direction TB
+        UI["UI<br/>TypeScript in a WebView"]
+        subgraph Core["Rust backend"]
+            direction TB
+            Search["Search<br/>ranks and merges results"]
+            Indexer["Indexer<br/>reads files on several CPU cores"]
+            Engine["Engine<br/>starts and talks to the model"]
+            Setup["Downloads<br/>model and GPU support"]
+        end
+        Llama["llama-server<br/>EmbeddingGemma 2 on GPU or CPU"]
+        DB[("SQLite<br/>vectors, text, keyword index, thumbnails")]
+    end
+
+    Net(["Hugging Face and GitHub<br/>optional one-time downloads"])
+
+    UI -- "query" --> Search
+    Search -- "results" --> UI
+    Files -- "read only" --> Indexer
+    Indexer -- "passages and images" --> Engine
+    Search -- "query text" --> Engine
+    Engine <-- "embeddings over local HTTP" --> Llama
+    Indexer -- "store" --> DB
+    Search -- "look up" --> DB
+    Net -.-> Setup
+    Setup -. "installs" .-> Llama
 ```
 
 - **Indexer** (`src-tauri/src/indexer.rs`): walks the folders, splits text into overlapping
