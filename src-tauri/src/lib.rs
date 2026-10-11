@@ -455,7 +455,17 @@ pub fn run() {
         }
     }
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // Starting FileDig again brings the running copy to the front instead of opening a
+    // second one. FILEDIG_MULTI_INSTANCE lifts this, for testing copies side by side.
+    // This plugin has to be registered before any other.
+    if env_path("FILEDIG_MULTI_INSTANCE").is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_window(app);
+        }));
+    }
+
+    builder
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let key = request.uri().path().to_string();

@@ -190,6 +190,7 @@ the executable: the index, logs and downloads then go there instead of `%APPDATA
 | `FILEDIG_RUNTIME` | Folder holding the model and llama.cpp builds |
 | `FILEDIG_DATA` | Folder for the index, instead of the per-user data folder |
 | `FILEDIG_INDEX_THREADS` | Files read at once while indexing (default: half the logical cores, at most 8) |
+| `FILEDIG_MULTI_INSTANCE` | Set to any value to allow more than one copy to run at once, for testing |
 
 ## How it works
 
