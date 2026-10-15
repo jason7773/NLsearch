@@ -197,7 +197,7 @@ fn fetch(state: &AppState, asset: &Asset, dest: &Path, before: u64) -> Result<()
         }
         set_step(state, &format!("Downloading {}", asset.file));
 
-        let mut request = agent.get(asset.url).set("User-Agent", "FileDig");
+        let mut request = agent.get(asset.url).set("User-Agent", "NLsearch");
         if have > 0 {
             request = request.set("Range", &format!("bytes={have}-"));
         }

@@ -170,8 +170,8 @@ function showIdle() {
       "download",
       "One download to get started",
       offerGpu
-        ? "FileDig needs its search model. An NVIDIA graphics card was found, so GPU support is included to make indexing several times faster. Everything runs on this computer."
-        : "FileDig needs its search model. It is downloaded once and then runs entirely on this computer.",
+        ? "NLsearch needs its search model. An NVIDIA graphics card was found, so GPU support is included to make indexing several times faster. Everything runs on this computer."
+        : "NLsearch needs its search model. It is downloaded once and then runs entirely on this computer.",
       ...extra,
     );
     return;
@@ -183,7 +183,7 @@ function showIdle() {
     emptyState(
       "folder",
       "Add a folder to search",
-      "FileDig reads the documents and pictures in the folders you choose, so you can find them by what they contain.",
+      "NLsearch reads the documents and pictures in the folders you choose, so you can find them by what they contain.",
       add,
       el("span", "hint", "You can also drag a folder here."),
     );
@@ -636,7 +636,7 @@ async function refreshSetup() {
     ? "Installed. Searching and indexing use your NVIDIA graphics card."
     : setup.gpu_supported
       ? "An NVIDIA graphics card was found. Downloading GPU support makes indexing several times faster."
-      : "No NVIDIA graphics card was found, so FileDig runs on the processor.";
+      : "No NVIDIA graphics card was found, so NLsearch runs on the processor.";
   const gpuAction = $<HTMLButtonElement>("gpu-action");
   gpuAction.hidden = setup.gpu_installed || !setup.gpu_supported;
   gpuAction.textContent = `Download GPU support (${megabytes(setup.gpu_size)})`;
@@ -644,7 +644,7 @@ async function refreshSetup() {
 
   $("model-state").textContent = setup.model_installed
     ? "Installed: EmbeddingGemma 2 (8-bit)."
-    : "Not installed. FileDig cannot search until the model is downloaded.";
+    : "Not installed. NLsearch cannot search until the model is downloaded.";
   const modelAction = $<HTMLButtonElement>("model-action");
   modelAction.hidden = setup.model_installed;
   modelAction.textContent = `Download model (${megabytes(setup.model_size)})`;

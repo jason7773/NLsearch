@@ -225,9 +225,9 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
 }
 
 /// How many files are read at once: half the logical cores, so the rest of the PC
-/// stays responsive. FILEDIG_INDEX_THREADS overrides it.
+/// stays responsive. NLSEARCH_INDEX_THREADS overrides it.
 fn extract_threads() -> usize {
-    if let Some(n) = std::env::var("FILEDIG_INDEX_THREADS").ok().and_then(|v| v.parse().ok()) {
+    if let Some(n) = std::env::var("NLSEARCH_INDEX_THREADS").ok().and_then(|v| v.parse().ok()) {
         return std::cmp::max(n, 1);
     }
     let cores = std::thread::available_parallelism().map_or(2, |n| n.get());

@@ -1,4 +1,4 @@
-# Builds a portable copy of FileDig: one folder that runs from anywhere (USB stick,
+# Builds a portable copy of NLsearch: one folder that runs from anywhere (USB stick,
 # network share) without installation and keeps its index beside the executable.
 #
 #   pwsh scripts\package-portable.ps1            GPU (CUDA) and CPU backends
@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $runtime = Join-Path $root 'runtime'
-$name = if ($Lite) { 'FileDig-lite' } elseif ($CpuOnly) { 'FileDig-cpu' } else { 'FileDig' }
+$name = if ($Lite) { 'NLsearch-lite' } elseif ($CpuOnly) { 'NLsearch-cpu' } else { 'NLsearch' }
 $out = Join-Path $root "dist-portable\$name"
 
 # Link the C runtime statically so the executable needs no Visual C++ redistributable.
@@ -31,7 +31,7 @@ try {
 
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $out, "$out\runtime\models" | Out-Null
-Copy-Item (Join-Path $root 'src-tauri\target\release\filedig.exe') "$out\FileDig.exe"
+Copy-Item (Join-Path $root 'src-tauri\target\release\nlsearch.exe') "$out\NLsearch.exe"
 
 # Of each llama.cpp build only the server and its libraries are needed.
 $backends = if ($CpuOnly -or $Lite) { @('llama-cpu') } else { @('llama-cuda', 'llama-cpu') }
@@ -49,9 +49,9 @@ if (-not $Lite) {
 New-Item -ItemType Directory -Force "$out\data" | Out-Null
 Copy-Item (Join-Path $root 'LICENSE') "$out\LICENSE.txt"
 @"
-FileDig (portable)
+NLsearch (portable)
 
-Run FileDig.exe. Nothing is installed and nothing is written outside this folder:
+Run NLsearch.exe. Nothing is installed and nothing is written outside this folder:
 the index, logs and settings are kept in the "data" folder. Delete "data" to reset.
 
 Requires 64-bit Windows 10 or 11 with the Microsoft Edge WebView2 Runtime, which is

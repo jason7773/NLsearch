@@ -96,7 +96,7 @@ impl AppState {
 /// `runtime/` holds the llama.cpp builds and model files. It is looked up next
 /// to the executable and in its parent folders, so `tauri dev` finds the one in the repo.
 fn find_runtime() -> PathBuf {
-    if let Some(dir) = env_path("FILEDIG_RUNTIME") {
+    if let Some(dir) = env_path("NLSEARCH_RUNTIME") {
         return dir;
     }
     let exe = std::env::current_exe().unwrap_or_default();
@@ -113,10 +113,10 @@ fn env_path(name: &str) -> Option<PathBuf> {
 }
 
 /// Where the index lives when it is not the per-user app data folder: the path in
-/// FILEDIG_DATA, or a `data` folder beside the executable, which is what makes a
+/// NLSEARCH_DATA, or a `data` folder beside the executable, which is what makes a
 /// copy of the app portable.
 fn custom_data_dir() -> Option<PathBuf> {
-    if let Some(dir) = env_path("FILEDIG_DATA") {
+    if let Some(dir) = env_path("NLSEARCH_DATA") {
         return Some(dir);
     }
     let beside_exe = std::env::current_exe().ok()?.parent()?.join("data");
@@ -452,10 +452,10 @@ pub fn run() {
     }
 
     let mut builder = tauri::Builder::default();
-    // Starting FileDig again brings the running copy to the front instead of opening a
-    // second one. FILEDIG_MULTI_INSTANCE lifts this, for testing copies side by side.
+    // Starting NLsearch again brings the running copy to the front instead of opening a
+    // second one. NLSEARCH_MULTI_INSTANCE lifts this, for testing copies side by side.
     // This plugin has to be registered before any other.
-    if env_path("FILEDIG_MULTI_INSTANCE").is_none() {
+    if env_path("NLSEARCH_MULTI_INSTANCE").is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_window(app);
         }));
@@ -516,12 +516,12 @@ pub fn run() {
                 eprintln!("could not register {HOTKEY}: {e}");
             }
 
-            let show = MenuItem::with_id(app, "show", "Show FileDig", true, None::<&str>)?;
-            let about = MenuItem::with_id(app, "about", "About FileDig", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show NLsearch", true, None::<&str>)?;
+            let about = MenuItem::with_id(app, "about", "About NLsearch", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("FileDig")
+                .tooltip("NLsearch")
                 .menu(&Menu::with_items(app, &[&show, &about, &quit])?)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

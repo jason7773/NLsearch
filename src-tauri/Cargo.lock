@@ -1132,7 +1132,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "filedig"
+name = "nlsearch"
 version = "0.1.0"
 dependencies = [
  "anyhow",

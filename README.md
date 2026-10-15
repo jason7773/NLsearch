@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128.png" width="96" alt="FileDig icon" />
+<img src="src-tauri/icons/128x128.png" width="96" alt="NLsearch icon" />
 
-# FileDig
+# NLsearch
 
 **Find your files by what they contain, not what they are called.**
 
@@ -12,18 +12,20 @@ Local semantic search for documents and pictures on Windows. Nothing leaves your
 
 [Download](../../releases/latest) · [Features](#features) · [Getting started](#getting-started) · [Build from source](#build-from-source)
 
-<img src="docs/screenshot.png" width="760" alt="FileDig showing search results" />
+<img src="docs/screenshot.png" width="760" alt="NLsearch showing search results" />
 
 </div>
 
 ## About
 
 Type what you are looking for in plain language, such as *"how much is the rent"* or
-*"photo of a sunset"*, and FileDig finds the matching text files, PDFs and images by meaning.
+*"photo of a sunset"*, and NLsearch finds the matching text files, PDFs and images by meaning.
 
 It runs [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) on your own machine
 through [llama.cpp](https://github.com/ggml-org/llama.cpp), using an NVIDIA GPU when one is
-available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS.
+available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS, and based on
+[FileDig](https://github.com/rupeshs/filedig) by Rupesh Sreeraman, with a new name, a new logo, Chinese,
+Japanese and Korean text handling, and Windows installers.
 
 ## Features
 
@@ -56,12 +58,14 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 
 ### Install
 
-1. Download `FileDig-lite.zip` from the [latest release](../../releases/latest).
-2. Unzip it anywhere and run `FileDig.exe`.
-3. Click **Download model** on the start screen. This is a one-time download of about 825 MB.
-4. Click **Folders**, then **Add folder**, or drag a folder into the window.
+1. Open the [latest release](../../releases/latest) and download either:
+   - `NLsearch_<version>_x64-setup.exe`, the installer (an `.msi` is also provided for managed PCs), or
+   - `NLsearch-lite.zip`, a portable copy: unzip anywhere and run `NLsearch.exe`.
+2. Start NLsearch and click **Download model** on the start screen. This is a one-time download of about 825 MB.
+3. Click **Folders**, then **Add folder**, or drag a folder into the window.
 
-Indexing starts straight away, and you can search while it runs.
+Indexing starts straight away, and you can search while it runs. The installer includes the CPU
+backend, so nothing else is needed to get going.
 
 ### Turn on GPU acceleration
 
@@ -85,11 +89,11 @@ Only an up-to-date NVIDIA driver is needed. The CUDA toolkit is not.
 - **Exact match** marks results that contain every word you typed.
 - **Rescan**, in the Folders panel, picks up files added, changed or deleted since the last pass.
   A rescan also runs each time the app starts.
-- Closing the window keeps FileDig in the tray. To quit, right-click the tray icon and choose **Quit**.
+- Closing the window keeps NLsearch in the tray. To quit, right-click the tray icon and choose **Quit**.
 
 ## Privacy
 
-Searching and indexing never leave your computer. The only network requests FileDig makes are the
+Searching and indexing never leave your computer. The only network requests NLsearch makes are the
 two optional downloads you start yourself: the model from Hugging Face and GPU support from the
 llama.cpp releases on GitHub. Both are pinned to exact versions and verified by SHA-256 before use.
 
@@ -113,15 +117,15 @@ next search.
 <br>
 
 The in-app downloads are a convenience, not a requirement. If the files are already in place,
-FileDig uses them and never offers the download. This suits offline PCs and slow connections:
+NLsearch uses them and never offers the download. This suits offline PCs and slow connections:
 download once on another machine and copy the `runtime` folder across.
 
-FileDig looks in two `runtime` folders, in this order:
+NLsearch looks in two `runtime` folders, in this order:
 
-1. Inside the data folder: `%APPDATA%\com.rupesh.filedig\runtime` for an installed copy, or
+1. Inside the data folder: `%APPDATA%\com.jason7773.nlsearch\runtime` for an installed copy, or
    `data\runtime` in a portable copy. The in-app downloads go here.
-2. Beside the executable: the `runtime` folder next to `FileDig.exe`, or the folder named by
-   `FILEDIG_RUNTIME`.
+2. Beside the executable: the `runtime` folder next to `NLsearch.exe`, or the folder named by
+   `NLSEARCH_RUNTIME`.
 
 Either location works, and the parts can be split between them.
 
@@ -151,7 +155,7 @@ Things to get right:
 - Files go directly in the folder, not in a subfolder created by the unzip tool.
 - Use llama.cpp build `b11552` or later; earlier builds do not support this model. Pair the
   CUDA 12.4 zip with the 12.4 cudart zip.
-- Restart FileDig afterwards so it picks up the new files.
+- Restart NLsearch afterwards so it picks up the new files.
 - Files placed by hand are not checksum-verified. A truncated download shows up as the model
   failing to start; the reason is in `llama-cuda.log` or `llama-cpu.log` in the data folder.
 
@@ -162,8 +166,8 @@ Things to get right:
 You need [Rust](https://rustup.rs), [Node.js](https://nodejs.org) and [pnpm](https://pnpm.io).
 
 ```sh
-git clone <this repository>
-cd filedig
+git clone https://github.com/jason7773/NLsearch
+cd NLsearch
 pnpm install
 pnpm tauri dev
 ```
@@ -171,6 +175,12 @@ pnpm tauri dev
 The app offers to download the model on first run. To use files you already have, place a
 `runtime` folder in the project root, laid out as described in
 *Installing the model and GPU support by hand* above.
+
+### Installers and releases
+
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`, which builds the NSIS installer,
+the MSI and `NLsearch-lite.zip` on a Windows runner and attaches them to a GitHub release. The
+installer bundles the llama.cpp CPU backend through `src-tauri/tauri.release.conf.json`.
 
 ### Portable packages
 
@@ -187,10 +197,10 @@ the executable: the index, logs and downloads then go there instead of `%APPDATA
 
 | Environment variable | Purpose |
 |---|---|
-| `FILEDIG_RUNTIME` | Folder holding the model and llama.cpp builds |
-| `FILEDIG_DATA` | Folder for the index, instead of the per-user data folder |
-| `FILEDIG_INDEX_THREADS` | Files read at once while indexing (default: half the logical cores, at most 8) |
-| `FILEDIG_MULTI_INSTANCE` | Set to any value to allow more than one copy to run at once, for testing |
+| `NLSEARCH_RUNTIME` | Folder holding the model and llama.cpp builds |
+| `NLSEARCH_DATA` | Folder for the index, instead of the per-user data folder |
+| `NLSEARCH_INDEX_THREADS` | Files read at once while indexing (default: half the logical cores, at most 8) |
+| `NLSEARCH_MULTI_INSTANCE` | Set to any value to allow more than one copy to run at once, for testing |
 
 ## How it works
 
@@ -198,7 +208,7 @@ the executable: the index, logs and downloads then go there instead of `%APPDATA
 flowchart LR
     Files[("Your folders<br/>documents and pictures")]
 
-    subgraph App["FileDig"]
+    subgraph App["NLsearch"]
         direction TB
         UI["UI<br/>TypeScript in a WebView"]
         subgraph Core["Rust backend"]
@@ -240,7 +250,7 @@ flowchart LR
   checksum verification.
 - **UI** (`src/`): plain TypeScript and CSS, built with Vite.
 
-The index is stored at `%APPDATA%\com.rupesh.filedig\index.db`. Deleting that file resets it.
+The index is stored at `%APPDATA%\com.jason7773.nlsearch\index.db`. Deleting that file resets it.
 
 ## Limitations
 
@@ -255,6 +265,7 @@ The index is stored at `%APPDATA%\com.rupesh.filedig\index.db`. Deleting that fi
 
 ## Acknowledgements
 
+- [FileDig](https://github.com/rupeshs/filedig) by Rupesh Sreeraman (MIT), the project NLsearch is built on
 - [DigUp](https://github.com/ARahim3/DigUp), the macOS app that inspired this one
 - [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) by Google DeepMind (Apache 2.0)
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT)
@@ -262,4 +273,4 @@ The index is stored at `%APPDATA%\com.rupesh.filedig\index.db`. Deleting that fi
 
 ## License
 
-[MIT](LICENSE) © 2026 Rupesh Sreeraman
+[MIT](LICENSE) © 2026 Rupesh Sreeraman, jason7773
