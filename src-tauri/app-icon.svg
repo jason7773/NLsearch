@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Source for every icon size: regenerate with `pnpm tauri icon src-tauri/app-icon.svg`. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#tile)"/>
+  <!-- Magnifier whose lens holds a spark: search by meaning, not by file name. -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="448" cy="448" r="220" stroke-width="72"/>
+    <path d="M616 616 790 790" stroke-width="100"/>
+  </g>
+  <path fill="#ffffff" d="M448 308 C462 392 484 414 568 428 C484 442 462 464 448 548 C434 464 412 442 328 428 C412 414 434 392 448 308Z" transform="translate(0 20)"/>
+  <circle cx="548" cy="530" r="26" fill="#ffffff" opacity=".85"/>
+</svg>

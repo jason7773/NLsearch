@@ -1,0 +1,51 @@
+[package]
+name = "nlsearch"
+version = "0.1.0"
+description = "Local semantic file search powered by EmbeddingGemma 2"
+authors = ["jason7773"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "nlsearch_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
+encoding_rs = "0.8"
+chardetng = "0.1"
+ureq = { version = "2", features = ["json"] }
+walkdir = "2"
+sha2 = "0.10"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+pdf-extract = "0.9"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+# Dependencies are optimised in dev builds too: unoptimised image decoding and
+# PDF parsing make indexing many times slower.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# panic stays "unwind": the indexer uses catch_unwind to survive malformed PDFs.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

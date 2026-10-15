@@ -1,0 +1,79 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows installers and a portable zip and
+# publishes them as a GitHub release. "Run workflow" builds them without publishing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # The CPU backend ships inside the installer so search works with no extra download.
+      - name: Fetch llama.cpp CPU backend
+        shell: pwsh
+        run: |
+          $zip = 'llama-b11552-bin-win-cpu-x64.zip'
+          Invoke-WebRequest "https://github.com/ggml-org/llama.cpp/releases/download/b11552/$zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne 'c00741179811ff903b515eae28bdeef1f47af6e81c49920c4e68b62954e056d6') { throw "checksum mismatch: $hash" }
+          New-Item -ItemType Directory -Force runtime/llama-cpu | Out-Null
+          Expand-Archive $zip runtime/llama-cpu -Force
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: NLsearch ${{ github.ref_name }}
+          releaseBody: |
+            Download **NLsearch_*_x64-setup.exe** (installer) or **NLsearch-lite.zip** (portable, no install).
+            On first run, click **Download model** (about 825 MB, one time).
+          releaseDraft: false
+          prerelease: false
+          args: --config src-tauri/tauri.release.conf.json
+
+      - name: Build portable zip
+        shell: pwsh
+        run: pwsh scripts/package-portable.ps1 -Lite -Zip
+
+      - name: Upload portable zip to the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist-portable/NLsearch-lite.zip --clobber
+
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag'
+        with:
+          name: windows-build
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            dist-portable/NLsearch-lite.zip

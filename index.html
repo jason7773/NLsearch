@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NLsearch</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <header>
+      <div class="searchbox">
+        <span class="icon" data-icon="search"></span>
+        <input id="query" type="text" placeholder="Search files" autocomplete="off" spellcheck="false" autofocus />
+        <span id="spinner" class="spinner" hidden></span>
+        <button id="clear" class="subtle" title="Clear" hidden><span class="icon" data-icon="close"></span></button>
+      </div>
+      <div class="toolbar">
+        <div id="filters" class="tabs" role="tablist">
+          <button data-filter="all" class="active" role="tab">All</button>
+          <button data-filter="docs" role="tab">Documents</button>
+          <button data-filter="images" role="tab">Images</button>
+        </div>
+        <span id="meta"></span>
+        <button id="folders-toggle" title="Choose which folders are searched">
+          <span class="icon" data-icon="folder"></span>Folders<span id="folder-count" hidden></span>
+        </button>
+        <button id="settings-open" class="subtle" title="Settings"><span class="icon" data-icon="gear"></span></button>
+      </div>
+    </header>
+
+    <div id="banner" hidden>
+      <span class="icon" data-icon="info"></span>
+      <span id="banner-text"></span>
+      <button id="banner-action"></button>
+    </div>
+
+    <div id="tip" hidden>
+      <span class="icon" data-icon="bolt"></span>
+      <span id="tip-text">An NVIDIA graphics card was found. GPU support makes indexing several times faster.</span>
+      <button id="tip-action" class="accent"></button>
+      <button id="tip-dismiss" class="subtle" title="Not now"><span class="icon" data-icon="close"></span></button>
+    </div>
+
+    <main id="results"></main>
+
+    <footer>
+      <div id="progress"><div id="progress-fill"></div></div>
+      <span id="dot"></span>
+      <span id="status"></span>
+      <span id="backend" hidden></span>
+      <span class="hints">
+        <kbd>Enter</kbd> Open <kbd>Ctrl</kbd><kbd>Enter</kbd> Show in folder <kbd>Esc</kbd> Hide
+      </span>
+      <button id="about-open" class="subtle" title="About NLsearch"><span class="icon" data-icon="info"></span></button>
+    </footer>
+
+    <dialog id="about">
+      <h2 id="about-name">NLsearch</h2>
+      <p id="about-version" class="about-version"></p>
+      <p>Find documents and pictures on this computer by what they contain. Everything runs locally; no file leaves your device.</p>
+      <dl>
+        <dt>Model</dt>
+        <dd>EmbeddingGemma 2 (8-bit), by Google DeepMind</dd>
+        <dt>Running on</dt>
+        <dd id="about-engine"></dd>
+        <dt>Index</dt>
+        <dd id="about-index"></dd>
+        <dt>License</dt>
+        <dd>MIT. See LICENSE</dd>
+      </dl>
+      <div class="dialog-actions">
+        <button id="about-close" class="accent">Close</button>
+      </div>
+    </dialog>
+
+    <dialog id="settings">
+      <h2>Settings</h2>
+
+      <section>
+        <h3>Graphics acceleration</h3>
+        <p id="gpu-state"></p>
+        <button id="gpu-action" class="accent" hidden></button>
+      </section>
+
+      <section>
+        <h3>Search model</h3>
+        <p id="model-state"></p>
+        <button id="model-action" class="accent" hidden></button>
+      </section>
+
+      <div id="download" hidden>
+        <div class="bar"><div id="download-fill"></div></div>
+        <div class="download-row">
+          <span id="download-text"></span>
+          <button id="download-cancel">Cancel</button>
+        </div>
+      </div>
+      <p id="download-error" class="error" hidden></p>
+
+      <div class="dialog-actions">
+        <button id="settings-close">Close</button>
+      </div>
+    </dialog>
+
+    <div id="backdrop" hidden></div>
+    <aside id="drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <h2>Folders</h2>
+        <button id="drawer-close" class="subtle" title="Close"><span class="icon" data-icon="close"></span></button>
+      </div>
+      <p class="drawer-intro">NLsearch looks through these folders. Files stay on this computer.</p>
+      <ul id="folders"></ul>
+      <div class="drawer-actions">
+        <button id="add-folder" class="accent"><span class="icon" data-icon="plus"></span>Add folder</button>
+        <button id="reindex" title="Look for new, changed and deleted files"><span class="icon" data-icon="refresh"></span>Rescan</button>
+      </div>
+    </aside>
+
+    <div id="drop" hidden>
+      <div class="drop-card">
+        <span class="icon" data-icon="folder"></span>
+        Drop to add folder
+      </div>
+    </div>
+
+    <div id="toast" role="status"></div>
+  </body>
+</html>
