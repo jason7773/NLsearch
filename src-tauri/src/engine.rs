@@ -3,33 +3,19 @@
 
 use std::fs::File;
 use std::net::TcpListener;
-use std::os::windows::io::AsRawHandle;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{bail, Context, Result};
+use nlsearch_core::embed::{Embedder, HttpEmbedder, Input};
 
 pub const MODEL_FILE: &str = "embeddinggemma-2-Q8_0.gguf";
 pub const MMPROJ_FILE: &str = "mmproj-embeddinggemma-2-Q8_0.gguf";
-/// Stored with the index so vectors from a different model are never mixed.
-pub const MODEL_ID: &str = "embeddinggemma-2-Q8_0";
-pub const DIM: usize = 768;
-
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-pub enum Input {
-    Text(String),
-    /// Base64-encoded JPEG.
-    Image(String),
-}
 
 pub struct Engine {
     child: Child,
-    port: u16,
+    client: HttpEmbedder,
     pub backend: &'static str,
 }
 
@@ -66,54 +52,11 @@ impl Engine {
         }
         bail!("could not start llama-server ({})", errors.join("; "))
     }
+}
 
-    /// Returns one L2-normalised vector per input, in input order.
-    pub fn embed(&self, inputs: &[Input]) -> Result<Vec<Vec<f32>>> {
-        let items: Vec<Value> = inputs
-            .iter()
-            .map(|i| match i {
-                Input::Text(t) => json!(t),
-                Input::Image(b64) => json!({ "content": [{
-                    "type": "image_url",
-                    "image_url": { "url": format!("data:image/jpeg;base64,{b64}") }
-                }]}),
-            })
-            .collect();
-
-        let resp: Value = ureq::post(&format!("http://127.0.0.1:{}/v1/embeddings", self.port))
-            .timeout(Duration::from_secs(600))
-            .send_json(json!({ "input": items, "encoding_format": "float" }))
-            .map_err(|e| match e {
-                ureq::Error::Status(code, r) => {
-                    anyhow!("llama-server {code}: {}", r.into_string().unwrap_or_default())
-                }
-                other => anyhow!(other),
-            })?
-            .into_json()?;
-
-        let data = resp["data"].as_array().context("embeddings response has no data")?;
-        let mut out = vec![Vec::new(); inputs.len()];
-        for d in data {
-            let idx = d["index"].as_u64().context("embedding without index")? as usize;
-            let mut v: Vec<f32> = d["embedding"]
-                .as_array()
-                .context("embedding is not an array")?
-                .iter()
-                .map(|x| x.as_f64().unwrap_or(0.0) as f32)
-                .collect();
-            if v.len() != DIM {
-                bail!("expected {DIM}-d embedding, got {}", v.len());
-            }
-            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if norm > 0.0 {
-                v.iter_mut().for_each(|x| *x /= norm);
-            }
-            *out.get_mut(idx).context("embedding index out of range")? = v;
-        }
-        if out.iter().any(|v| v.is_empty()) {
-            bail!("llama-server returned fewer embeddings than inputs");
-        }
-        Ok(out)
+impl Embedder for Engine {
+    fn embed(&self, inputs: &[Input]) -> Result<Vec<Vec<f32>>> {
+        self.client.embed(inputs)
     }
 }
 
@@ -133,7 +76,7 @@ pub fn gpu_backend_installed(roots: &[PathBuf]) -> bool {
 fn has_cuda_device(exe: &Path) -> bool {
     Command::new(exe)
         .arg("--list-devices")
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .output()
         .map(|o| {
             let text = [o.stdout, o.stderr].concat();
@@ -164,11 +107,12 @@ fn spawn(
         .stdin(Stdio::null())
         .stdout(Stdio::from(log.try_clone()?))
         .stderr(Stdio::from(log))
-        .creation_flags(CREATE_NO_WINDOW)
+        .no_window()
         .spawn()
         .with_context(|| format!("failed to launch {}", exe.display()))?;
     kill_with_parent(&child);
-    let mut engine = Engine { child, port, backend };
+    let client = HttpEmbedder::new(&format!("http://127.0.0.1:{port}"));
+    let mut engine = Engine { child, client, backend };
 
     let health = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + Duration::from_secs(180);
@@ -186,9 +130,31 @@ fn spawn(
     }
 }
 
+/// Keeps helper processes from opening a console window of their own.
+trait NoWindow {
+    fn no_window(&mut self) -> &mut Self;
+}
+
+impl NoWindow for Command {
+    #[cfg(windows)]
+    fn no_window(&mut self) -> &mut Self {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        self.creation_flags(CREATE_NO_WINDOW)
+    }
+
+    #[cfg(not(windows))]
+    fn no_window(&mut self) -> &mut Self {
+        self
+    }
+}
+
 /// Puts the helper in a job object that is closed when this process dies, so
 /// a crash or forced kill of the app never leaves llama-server holding VRAM.
+#[cfg(windows)]
 fn kill_with_parent(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
     use windows_sys::Win32::System::JobObjects::*;
 
     static JOB: OnceLock<usize> = OnceLock::new();
@@ -208,3 +174,7 @@ fn kill_with_parent(child: &Child) {
         AssignProcessToJobObject(job as _, child.as_raw_handle() as _);
     }
 }
+
+/// Elsewhere the app is only built to run the tests, so the helper is left alone.
+#[cfg(not(windows))]
+fn kill_with_parent(_child: &Child) {}

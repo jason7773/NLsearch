@@ -1,0 +1,61 @@
+name: Test
+
+# Every push and pull request: the core tests on Linux (fast, no desktop libraries
+# needed) and the whole app on Windows, where it actually runs.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: core
+
+      - name: cargo test -p nlsearch-core
+        working-directory: src-tauri
+        run: cargo test -p nlsearch-core
+
+  windows:
+    name: App build and tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # Type-checks the frontend and produces dist/, which the app embeds when it compiles.
+      - run: pnpm build
+
+      - name: cargo test --workspace
+        working-directory: src-tauri
+        run: cargo test --workspace

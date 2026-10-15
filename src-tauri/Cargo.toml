@@ -13,6 +13,9 @@ edition = "2021"
 name = "nlsearch_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[workspace]
+members = ["core"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -25,16 +28,13 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+nlsearch-core = { path = "core" }
 rusqlite = { version = "0.32", features = ["bundled", "functions"] }
-encoding_rs = "0.8"
-chardetng = "0.1"
 ureq = { version = "2", features = ["json"] }
-walkdir = "2"
 sha2 = "0.10"
-base64 = "0.22"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
-pdf-extract = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 # Dependencies are optimised in dev builds too: unoptimised image decoding and

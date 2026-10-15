@@ -174,6 +174,21 @@ The app offers to download the model on first run. To use files you already have
 `runtime` folder in the project root, laid out as described in
 *Installing the model and GPU support by hand* above.
 
+### Tests
+
+Indexing, storage and search live in the `nlsearch-core` crate (`src-tauri/core`), which depends on
+neither Tauri nor Windows. Its tests use a fake embedding model and a mock `llama-server`, so they
+run on any OS without the model:
+
+```sh
+cd src-tauri
+cargo test -p nlsearch-core   # core only, any OS
+cargo test --workspace        # the whole app; run `pnpm build` first
+```
+
+`.github/workflows/test.yml` runs the core tests on Linux and builds and tests the whole app on
+Windows for every push and pull request.
+
 ### Installers and releases
 
 Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`, which builds the NSIS installer,
@@ -234,15 +249,16 @@ flowchart LR
     Setup -. "installs" .-> Llama
 ```
 
-- **Indexer** (`src-tauri/src/indexer.rs`): walks the folders, splits text into overlapping
-  passages of about 1,200 characters, extracts PDF text page by page, and downsizes images before
-  embedding. Files are read on several CPU cores while the model works on the GPU.
+- **Indexer** (`src-tauri/core/src/extract.rs`, `index.rs`): walks the folders, splits text into
+  overlapping passages of about 1,200 characters, extracts PDF text page by page, and downsizes
+  images before embedding. Files are read on several CPU cores while the model works on the GPU
+  (`src-tauri/src/indexer.rs`).
 - **Engine** (`src-tauri/src/engine.rs`): runs `llama-server` as a hidden helper on a free local
-  port. Text and images are embedded into the same 768-dimensional space, so a text query can
-  match either.
-- **Storage** (`src-tauri/src/db.rs`): one SQLite file holds the files, passages, vectors,
+  port; `src-tauri/core/src/embed.rs` talks to it. Text and images are embedded into the same
+  768-dimensional space, so a text query can match either.
+- **Storage** (`src-tauri/core/src/db.rs`): one SQLite file holds the files, passages, vectors,
   thumbnails and an FTS5 keyword index. Vectors are compared by brute force in memory.
-- **Search** (`src-tauri/src/lib.rs`): the semantic and keyword rankings are merged with
+- **Search** (`src-tauri/core/src/search.rs`): the semantic and keyword rankings are merged with
   reciprocal rank fusion, and the best passage per file is shown.
 - **Downloads** (`src-tauri/src/setup.rs`): fetches the model and GPU backend with resume and
   checksum verification.

@@ -6,7 +6,7 @@ use anyhow::Result;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, TransactionBehavior};
 
-use crate::engine::{DIM, MODEL_ID};
+use crate::embed::{DIM, MODEL_ID};
 use crate::text;
 
 /// Version of what the keyword index stores; see `text::fts_text`. A database built
