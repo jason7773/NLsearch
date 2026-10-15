@@ -2,6 +2,7 @@ mod db;
 mod engine;
 mod indexer;
 mod setup;
+mod text;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -302,12 +303,7 @@ fn search(state: State<AppState>, query: String, filter: String, limit: usize) -
     };
 
     // Exact-match side: every query word must appear in the passage.
-    let fts_query = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(|w| format!("\"{w}\""))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let fts_query = text::fts_query(query);
     let mut keyword: Vec<i64> = Vec::new();
     if !fts_query.is_empty() {
         let mut stmt = conn

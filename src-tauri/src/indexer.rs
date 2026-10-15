@@ -17,10 +17,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db;
 use crate::engine::{Engine, Input};
+use crate::text::{self, chunk_text};
 use crate::AppState;
 
-const CHUNK_CHARS: usize = 1200;
-const CHUNK_OVERLAP: usize = 150;
 /// Inputs per embedding request. Kept small so a search never waits long behind one.
 const EMBED_BATCH: usize = 8;
 /// Longest image side sent to the model.
@@ -411,10 +410,7 @@ fn extract(file: &Candidate) -> Result<(Vec<Item>, Option<Vec<u8>>)> {
 
 fn read_text(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path)?;
-    if bytes.iter().take(4096).any(|b| *b == 0) {
-        anyhow::bail!("binary file");
-    }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    text::decode(&bytes)
 }
 
 fn docx_text(path: &Path) -> Result<String> {
@@ -462,31 +458,4 @@ fn strip_tags(markup: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&nbsp;", " ")
-}
-
-/// Splits into overlapping passages of about `CHUNK_CHARS`, breaking on whitespace.
-fn chunk_text(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = Vec::new();
-    let mut start = 0;
-    while start < chars.len() {
-        let mut end = (start + CHUNK_CHARS).min(chars.len());
-        if end < chars.len() {
-            if let Some(p) = chars[start..end].iter().rposition(|c| c.is_whitespace()) {
-                if p > CHUNK_CHARS / 2 {
-                    end = start + p;
-                }
-            }
-        }
-        let piece: String = chars[start..end].iter().collect();
-        let piece = piece.trim();
-        if piece.chars().count() >= 20 || (out.is_empty() && !piece.is_empty()) {
-            out.push(piece.to_string());
-        }
-        if end == chars.len() {
-            break;
-        }
-        start = end - CHUNK_OVERLAP;
-    }
-    out
 }

@@ -3,13 +3,26 @@
 use std::path::Path;
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::functions::FunctionFlags;
+use rusqlite::{params, Connection, TransactionBehavior};
 
 use crate::engine::{DIM, MODEL_ID};
+use crate::text;
+
+/// Version of what the keyword index stores; see `text::fts_text`. A database built
+/// with another version has its keyword index rebuilt on open.
+const KEYWORD_INDEX: &str = "cjk-1";
 
 pub fn open(path: &Path) -> Result<Connection> {
-    let conn = Connection::open(path)?;
+    let mut conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(30))?;
+    // The keyword index triggers call this, so it is registered before anything is written.
+    conn.create_scalar_function(
+        "fts_text",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC | FunctionFlags::SQLITE_INNOCUOUS,
+        |ctx| Ok(text::fts_text(&ctx.get::<String>(0)?)),
+    )?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
@@ -32,15 +45,7 @@ pub fn open(path: &Path) -> Result<Connection> {
              emb BLOB NOT NULL
          );
          CREATE INDEX IF NOT EXISTS chunks_file ON chunks(file_id);
-         CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, jpeg BLOB NOT NULL);
-         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
-             USING fts5(text, content='chunks', content_rowid='id');
-         CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-             INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
-         END;
-         CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-             INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
-         END;",
+         CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, jpeg BLOB NOT NULL);",
     )?;
 
     // Files of the folder still waiting to be indexed; NULL until its first scan.
@@ -51,6 +56,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     if !has_pending {
         conn.execute_batch("ALTER TABLE folders ADD COLUMN pending INTEGER")?;
     }
+
+    build_keyword_index(&mut conn)?;
 
     // Vectors from another model or quantisation are not comparable: drop them.
     let stored: Option<String> = conn
@@ -64,6 +71,59 @@ pub fn open(path: &Path) -> Result<Connection> {
         )?;
     }
     Ok(conn)
+}
+
+fn keyword_index_current(conn: &Connection) -> bool {
+    conn.query_row("SELECT value FROM meta WHERE key = 'keyword_index'", [], |r| r.get::<_, String>(0))
+        .is_ok_and(|v| v == KEYWORD_INDEX)
+}
+
+/// Creates the keyword index, or replaces one built by an earlier version.
+///
+/// The index holds `text::fts_text` of each passage rather than the passage itself, so
+/// it is contentless: it keeps only tokens and positions, and rows are deleted by id.
+fn build_keyword_index(conn: &mut Connection) -> Result<()> {
+    if keyword_index_current(conn) {
+        return Ok(());
+    }
+    // Several connections open at start-up; the first one in does the work.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if keyword_index_current(&tx) {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "DROP TRIGGER IF EXISTS chunks_ai;
+         DROP TRIGGER IF EXISTS chunks_ad;
+         DROP TABLE IF EXISTS chunks_fts;
+
+         -- Text files used to be read as UTF-8 only: Big5, GBK and other legacy files came
+         -- out garbled, and UTF-16 files were taken for binary and recorded empty. Forget
+         -- those so the next pass reads them again.
+         CREATE TEMP TABLE redo AS
+             SELECT f.id FROM files f
+             WHERE f.kind = 'text' AND (
+                 NOT EXISTS (SELECT 1 FROM chunks c WHERE c.file_id = f.id)
+                 OR EXISTS (SELECT 1 FROM chunks c WHERE c.file_id = f.id
+                            AND instr(c.text, char(65533)) > 0));
+         DELETE FROM chunks WHERE file_id IN (SELECT id FROM redo);
+         DELETE FROM files WHERE id IN (SELECT id FROM redo);
+         DROP TABLE redo;
+
+         CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content='', contentless_delete=1);
+         CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+             INSERT INTO chunks_fts(rowid, text) VALUES (new.id, fts_text(new.text));
+         END;
+         CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+             DELETE FROM chunks_fts WHERE rowid = old.id;
+         END;
+         INSERT INTO chunks_fts(rowid, text) SELECT id, fts_text(text) FROM chunks;",
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('keyword_index', ?1)",
+        params![KEYWORD_INDEX],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn delete_file(conn: &Connection, file_id: i64) -> Result<()> {
