@@ -7,10 +7,13 @@
 #                                                the app fetches the model, and GPU support
 #                                                if wanted, on first run
 #   pwsh scripts\package-portable.ps1 -Zip       also produce a .zip of the folder
+#   pwsh scripts\package-portable.ps1 -SkipBuild use the executable already in target\release,
+#                                                built with RUSTFLAGS=-C target-feature=+crt-static
 param(
     [switch]$CpuOnly,
     [switch]$Lite,
-    [switch]$Zip
+    [switch]$Zip,
+    [switch]$SkipBuild
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
@@ -18,15 +21,17 @@ $runtime = Join-Path $root 'runtime'
 $name = if ($Lite) { 'NLsearch-lite' } elseif ($CpuOnly) { 'NLsearch-cpu' } else { 'NLsearch' }
 $out = Join-Path $root "dist-portable\$name"
 
-# Link the C runtime statically so the executable needs no Visual C++ redistributable.
-$env:RUSTFLAGS = '-C target-feature=+crt-static'
-Push-Location $root
-try {
-    pnpm tauri build --no-bundle
-    if ($LASTEXITCODE -ne 0) { throw 'build failed' }
-} finally {
-    Pop-Location
-    Remove-Item Env:RUSTFLAGS
+if (-not $SkipBuild) {
+    # Link the C runtime statically so the executable needs no Visual C++ redistributable.
+    $env:RUSTFLAGS = '-C target-feature=+crt-static'
+    Push-Location $root
+    try {
+        pnpm tauri build --no-bundle
+        if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+    } finally {
+        Pop-Location
+        Remove-Item Env:RUSTFLAGS
+    }
 }
 
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }

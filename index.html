@@ -43,6 +43,13 @@
       <button id="tip-dismiss" class="subtle" title="Not now"><span class="icon" data-icon="close"></span></button>
     </div>
 
+    <div id="update" class="notice" hidden>
+      <span class="icon" data-icon="download"></span>
+      <span id="update-text"></span>
+      <button id="update-action" class="accent"></button>
+      <button id="update-dismiss" class="subtle" title="Not now"><span class="icon" data-icon="close"></span></button>
+    </div>
+
     <main id="results"></main>
 
     <footer>
@@ -88,6 +95,16 @@
         <h3>Search model</h3>
         <p id="model-state"></p>
         <button id="model-action" class="accent" hidden></button>
+      </section>
+
+      <section>
+        <h3>Updates</h3>
+        <p id="update-state"></p>
+        <label class="check"><input id="update-auto" type="checkbox" /> Check for updates automatically</label>
+        <div class="section-actions">
+          <button id="update-check">Check now</button>
+          <button id="update-install" class="accent" hidden></button>
+        </div>
       </section>
 
       <div id="download" hidden>

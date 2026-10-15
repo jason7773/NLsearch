@@ -33,6 +33,7 @@ rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+tauri-plugin-updater = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

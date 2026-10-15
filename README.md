@@ -37,6 +37,7 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 - ⌨️ **Global hotkey** (`Ctrl+Shift+Space`) and a tray icon
 - 🔒 **Private and read-only**: files are never changed, moved or uploaded
 - 📦 **Portable**: runs from a folder with no installation
+- ⬆️ **Updates itself**: a new release is offered in the app and installs with one click
 
 ### Supported files
 
@@ -91,11 +92,14 @@ Only an up-to-date NVIDIA driver is needed. The CUDA toolkit is not.
 
 ## Privacy
 
-Searching and indexing never leave your computer. The only network requests NLsearch makes are the
-two optional downloads you start yourself: the model from Hugging Face and GPU support from the
-llama.cpp releases on GitHub. Both are pinned to exact versions and verified by SHA-256 before use.
+Searching and indexing never leave your computer. NLsearch makes only these network requests:
 
-There is no account, no telemetry and no update check.
+- the two optional downloads you start yourself: the model from Hugging Face and GPU support from the
+  llama.cpp releases on GitHub. Both are pinned to exact versions and verified by SHA-256 before use;
+- an update check against this project's GitHub releases, at start-up and once a day. It sends nothing
+  but the request itself, and you can turn it off in **Settings**.
+
+There is no account and no telemetry.
 
 ## Performance
 
@@ -194,6 +198,12 @@ Windows for every push and pull request.
 Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`, which builds the NSIS installer,
 the MSI and `NLsearch-lite.zip` on a Windows runner and attaches them to a GitHub release. The
 installer bundles the llama.cpp CPU backend through `src-tauri/tauri.release.conf.json`.
+The version comes from the tag, so `v0.2.0` builds version 0.2.0.
+
+The release also carries `latest.json` and signed update packages, which installed copies read to
+update themselves. Signing needs two repository secrets, `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, matching the public key in `src-tauri/tauri.conf.json`.
+Keep a copy of the key: without it no further update can be published to existing installs.
 
 ### Portable packages
 

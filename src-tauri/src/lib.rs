@@ -22,6 +22,7 @@ use nlsearch_core::search::{self, Hit};
 
 use engine::Engine;
 
+const RELEASES: &str = "https://github.com/jason7773/NLsearch/releases/latest";
 const HOTKEY: &str = "ctrl+shift+space";
 /// The helper process is stopped after this long without use, freeing VRAM.
 const ENGINE_IDLE: Duration = Duration::from_secs(300);
@@ -285,6 +286,17 @@ fn search(state: State<AppState>, query: String, filter: String, limit: usize) -
     search::rank(&conn, &semantic, query, &filter, limit).map_err(err)
 }
 
+/// A portable copy cannot install updates over itself; it only points to the download.
+#[tauri::command]
+fn is_portable() -> bool {
+    custom_data_dir().is_some()
+}
+
+#[tauri::command]
+fn open_downloads(app: AppHandle) -> CmdResult<()> {
+    app.opener().open_url(RELEASES, None::<&str>).map_err(err)
+}
+
 #[tauri::command]
 fn open_file(app: AppHandle, path: String) -> CmdResult<()> {
     app.opener().open_path(path, None::<&str>).map_err(err)
@@ -380,6 +392,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -476,7 +489,9 @@ pub fn run() {
             cancel_download,
             search,
             open_file,
-            reveal_file
+            reveal_file,
+            is_portable,
+            open_downloads
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
