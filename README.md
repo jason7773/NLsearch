@@ -23,9 +23,7 @@ Type what you are looking for in plain language, such as *"how much is the rent"
 
 It runs [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) on your own machine
 through [llama.cpp](https://github.com/ggml-org/llama.cpp), using an NVIDIA GPU when one is
-available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS, and based on
-[FileDig](https://github.com/rupeshs/filedig) by Rupesh Sreeraman, with a new name, a new logo, Chinese,
-Japanese and Korean text handling, and Windows installers.
+available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/DigUp) for macOS.
 
 ## Features
 
@@ -265,7 +263,6 @@ The index is stored at `%APPDATA%\com.jason7773.nlsearch\index.db`. Deleting tha
 
 ## Acknowledgements
 
-- [FileDig](https://github.com/rupeshs/filedig) by Rupesh Sreeraman (MIT), the project NLsearch is built on
 - [DigUp](https://github.com/ARahim3/DigUp), the macOS app that inspired this one
 - [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) by Google DeepMind (Apache 2.0)
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT)
@@ -273,4 +270,4 @@ The index is stored at `%APPDATA%\com.jason7773.nlsearch\index.db`. Deleting tha
 
 ## License
 
-[MIT](LICENSE) © 2026 Rupesh Sreeraman, jason7773
+[MIT](LICENSE)
