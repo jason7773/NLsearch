@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 
 interface Hit {
   path: string;
@@ -732,6 +733,108 @@ $("download-cancel").addEventListener("click", async () => {
 setInterval(() => {
   if (settings.open || setup?.download.running) refreshSetup();
 }, 700);
+
+/** A newer release found on GitHub, if any. */
+let update: Update | null = null;
+let updateChecked = false;
+let updateDismissed = false;
+let installing = false;
+let portable = false;
+const UPDATE_INTERVAL = 24 * 60 * 60 * 1000;
+
+/** Automatic checks are on unless turned off in Settings. */
+function autoUpdate() {
+  try {
+    return localStorage.getItem("autoUpdate") !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/** Asks GitHub for the latest release; `quiet` keeps failures out of sight. */
+async function checkForUpdate(quiet: boolean) {
+  try {
+    update = await check();
+    updateChecked = true;
+  } catch (e) {
+    if (!quiet) toast(`Could not check for updates: ${e}`, true);
+    return;
+  }
+  showUpdate();
+}
+
+/** Reflects the latest check in the notice bar and in Settings. */
+async function showUpdate() {
+  const version = await getVersion();
+  const label = portable ? "Download" : "Update and restart";
+  $("update").hidden = !update || updateDismissed || installing;
+  $("update-text").textContent = `NLsearch ${update?.version} is available.`;
+  $("update-action").textContent = label;
+  $("update-state").textContent = update
+    ? `Version ${update.version} is available. You have ${version}.`
+    : updateChecked
+      ? `You have the latest version (${version}).`
+      : `You have version ${version}.`;
+  const install = $<HTMLButtonElement>("update-install");
+  install.hidden = !update;
+  install.textContent = label;
+  $<HTMLInputElement>("update-auto").checked = autoUpdate();
+}
+
+/** Installs the update, which closes NLsearch and reopens it; a portable copy gets the download page. */
+async function installUpdate() {
+  if (!update || installing) return;
+  if (portable) {
+    invoke("open_downloads");
+    return;
+  }
+  installing = true;
+  const buttons = [$<HTMLButtonElement>("update-action"), $<HTMLButtonElement>("update-install")];
+  let total = 0;
+  let done = 0;
+  try {
+    for (const b of buttons) b.disabled = true;
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength ?? 0;
+      else if (event.event === "Progress") done += event.data.chunkLength;
+      const text = event.event === "Finished" ? "Installing…" : total ? `Downloading ${Math.round((done / total) * 100)}%` : "Downloading…";
+      for (const b of buttons) b.textContent = text;
+    });
+  } catch (e) {
+    toast(`The update failed: ${e}`, true);
+  } finally {
+    installing = false;
+    for (const b of buttons) b.disabled = false;
+    showUpdate();
+  }
+}
+
+$("update-action").addEventListener("click", installUpdate);
+$("update-install").addEventListener("click", installUpdate);
+$("update-dismiss").addEventListener("click", () => {
+  updateDismissed = true;
+  $("update").hidden = true;
+});
+$("update-check").addEventListener("click", () => checkForUpdate(false));
+$("update-auto").addEventListener("change", (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  try {
+    localStorage.setItem("autoUpdate", on ? "1" : "0");
+  } catch {
+    // Without storage the default applies next time.
+  }
+  if (on) checkForUpdate(true);
+});
+
+invoke<boolean>("is_portable").then((p) => {
+  portable = p;
+  showUpdate();
+  if (autoUpdate()) checkForUpdate(true);
+});
+// NLsearch lives in the tray for days, so look again once a day.
+setInterval(() => {
+  if (autoUpdate()) checkForUpdate(true);
+}, UPDATE_INTERVAL);
 
 getCurrentWebview().onDragDropEvent(({ payload }) => {
   $("drop").hidden = payload.type !== "enter" && payload.type !== "over";

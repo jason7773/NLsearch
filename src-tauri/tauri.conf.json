@@ -41,5 +41,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY3MDkzNDcwRTE1ODYxQUQKUldTdFlWamhjRFFKWndjTVpYR050dlloMmpnZEZtWC9ZU2o3bUxmUWsrcE0veThXc2V4OC9LcncK",
+      "endpoints": [
+        "https://github.com/jason7773/NLsearch/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

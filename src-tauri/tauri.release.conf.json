@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "msi"],
     "resources": {
       "../runtime/llama-cpu/": "runtime/llama-cpu/"

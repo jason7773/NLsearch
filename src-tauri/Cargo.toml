@@ -36,6 +36,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 pdf-extract = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+tauri-plugin-updater = "2"
 
 # Dependencies are optimised in dev builds too: unoptimised image decoding and
 # PDF parsing make indexing many times slower.
