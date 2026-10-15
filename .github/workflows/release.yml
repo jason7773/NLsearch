@@ -1,11 +1,17 @@
 name: Release
 
 # Pushing a tag such as v0.1.0 builds the Windows installers and a portable zip and
-# publishes them as a GitHub release. "Run workflow" builds them without publishing.
+# publishes them as a GitHub release. "Run workflow" builds them, and publishes a release too
+# when a version such as v0.1.0 is entered.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to create, such as v0.1.0 (leave empty to build without publishing)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -49,8 +55,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: NLsearch ${{ github.ref_name }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          releaseName: NLsearch ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
           releaseBody: |
             Download **NLsearch_*_x64-setup.exe** (installer) or **NLsearch-lite.zip** (portable, no install).
             On first run, click **Download model** (about 825 MB, one time).
@@ -63,14 +69,15 @@ jobs:
         run: pwsh scripts/package-portable.ps1 -Lite -Zip
 
       - name: Upload portable zip to the release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.version != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" dist-portable/NLsearch-lite.zip --clobber
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+        run: gh release upload $env:TAG dist-portable/NLsearch-lite.zip --clobber
 
       - uses: actions/upload-artifact@v4
-        if: github.ref_type != 'tag'
+        if: github.ref_type != 'tag' && inputs.version == ''
         with:
           name: windows-build
           path: |
