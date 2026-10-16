@@ -59,6 +59,8 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     state.cancel.store(false, Ordering::SeqCst);
     let cancelled = || state.cancel.load(Ordering::SeqCst);
     let conn = db::open(&state.db_path)?;
+    let chunks = |conn: &Connection| conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get::<_, i64>(0));
+    let before = chunks(&conn)?;
     index::tidy(&conn)?;
     let settings = Settings::load(&conn)?;
     let exclusions = Exclusions::new(&settings.exclude);
@@ -86,7 +88,12 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
         let changed = index::plan_folder(&conn, *folder_id, scan(Path::new(folder), &exclusions), ocr_on)?;
         todo.extend(changed.into_iter().map(|file| (*folder_id, file)));
     }
-    state.cache_dirty.store(true, Ordering::SeqCst);
+    // Tidying and planning only remove passages, and the cache is read again whole only
+    // when they did: new passages are appended as they are written. A pass that finds
+    // nothing changed, which is most of what the folder watcher starts, keeps the cache.
+    if chunks(&conn)? != before {
+        state.cache_dirty.store(true, Ordering::SeqCst);
+    }
 
     if todo.is_empty() || cancelled() {
         return Ok(());
@@ -97,7 +104,8 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
         p.total = todo.len();
     }
     emit(app, state);
-    let engine = state.engine()?;
+    // Text needs only the text model; the picture encoder is loaded when there are pictures.
+    let engine = state.engine(todo.iter().any(|(_, file)| file.kind == "image"))?;
     state.progress.lock().unwrap().phase = "Indexing".into();
 
     // Reading files (decoding photos above all) is the slow part, so it runs on several

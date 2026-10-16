@@ -41,7 +41,7 @@ Write-Host "Starting $exe on port $port ($backend)"
 # Same arguments as src-tauri/src/engine.rs.
 $server = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden -RedirectStandardError $log -ArgumentList @(
     '-m', "`"$model`"", '--mmproj', "`"$mmproj`"", '--embeddings', '--pooling', 'mean',
-    '-c', '4096', '-b', '4096', '-ub', '4096', '-ngl', $ngl,
+    '-c', '2048', '-b', '2048', '-ub', '2048', '-ngl', $ngl, '--cache-ram', '0',
     '--host', '127.0.0.1', '--port', "$port")
 
 try {

@@ -41,6 +41,8 @@ tauri-plugin-clipboard-manager = "2"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Media_Ocr", "Graphics_Imaging", "Storage", "Storage_Streams", "Data_Pdf", "Security_Cryptography", "Globalization"] }
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# The same version as Tauri's own, so its WebView2 handles can be used directly.
+webview2-com = "0.39"
 
 # Dependencies are optimised in dev builds too: unoptimised image decoding and
 # PDF parsing make indexing many times slower.
