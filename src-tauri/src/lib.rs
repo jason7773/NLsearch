@@ -1,3 +1,4 @@
+mod cloud;
 mod engine;
 mod indexer;
 mod ocr;
@@ -207,6 +208,8 @@ struct Folder {
     files: i64,
     /// Files still waiting to be indexed; None until the folder's first scan.
     pending: Option<i64>,
+    /// Files left out because they are only in the cloud.
+    cloud: i64,
 }
 
 #[tauri::command(async)]
@@ -214,12 +217,12 @@ fn list_folders(state: State<AppState>) -> CmdResult<Vec<Folder>> {
     let conn = db::open(&state.db_path).map_err(err)?;
     let mut stmt = conn
         .prepare(
-            "SELECT d.id, d.path, (SELECT COUNT(*) FROM files f WHERE f.folder_id = d.id), d.pending
+            "SELECT d.id, d.path, (SELECT COUNT(*) FROM files f WHERE f.folder_id = d.id), d.pending, d.cloud
              FROM folders d ORDER BY d.path",
         )
         .map_err(err)?;
     let rows = stmt
-        .query_map([], |r| Ok(Folder { id: r.get(0)?, path: r.get(1)?, files: r.get(2)?, pending: r.get(3)? }))
+        .query_map([], |r| Ok(Folder { id: r.get(0)?, path: r.get(1)?, files: r.get(2)?, pending: r.get(3)?, cloud: r.get(4)? }))
         .map_err(err)?;
     rows.collect::<rusqlite::Result<_>>().map_err(err)
 }

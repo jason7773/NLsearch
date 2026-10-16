@@ -8,7 +8,7 @@ use std::sync::{mpsc, Mutex};
 
 use anyhow::Result;
 use nlsearch_core::db::{self, Settings};
-use nlsearch_core::extract::{extract, scan, Candidate, Exclusions, Item, Ocr};
+use nlsearch_core::extract::{extract, is_cloud_only, scan, Candidate, Exclusions, Item, Ocr};
 use nlsearch_core::index::{self, EMBED_BATCH};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager};
@@ -22,6 +22,8 @@ struct Job {
     items: Vec<Item>,
     /// Preview JPEG, for images.
     thumb: Option<Vec<u8>>,
+    /// A cloud file that could not be downloaded now; nothing is written for it.
+    left_in_cloud: bool,
 }
 
 /// Runs passes until no rescan is pending. Returns immediately if one is already running.
@@ -85,7 +87,7 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     // Work out what changed before loading the model.
     let mut todo: Vec<(i64, Candidate)> = Vec::new();
     for (folder_id, folder) in &folders {
-        let changed = index::plan_folder(&conn, *folder_id, scan(Path::new(folder), &exclusions), ocr_on)?;
+        let changed = index::plan_folder(&conn, *folder_id, scan(Path::new(folder), &exclusions), ocr_on, settings.cloud)?;
         todo.extend(changed.into_iter().map(|file| (*folder_id, file)));
     }
     // Tidying and planning only remove passages, and the cache is read again whole only
@@ -111,22 +113,25 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     // Reading files (decoding photos above all) is the slow part, so it runs on several
     // cores while this thread sends finished files to the model and writes the results.
     let queue = Mutex::new(todo.into_iter());
+    // Cloud files are downloaded one at a time, however many files are read at once.
+    let downloading = Mutex::new(());
     let (sender, receiver) = mpsc::sync_channel::<Job>(extract_threads() * 2);
     std::thread::scope(|scope| {
         for _ in 0..extract_threads() {
             let sender = sender.clone();
-            let queue = &queue;
+            let (queue, downloading) = (&queue, &downloading);
             scope.spawn(move || loop {
                 if state.cancel.load(Ordering::SeqCst) {
                     break;
                 }
                 let Some((folder_id, file)) = queue.lock().unwrap().next() else { break };
-                // A file that cannot be read is recorded with nothing to search.
-                let (items, thumb) = catch_unwind(AssertUnwindSafe(|| extract(&file, ocr)))
-                    .ok()
-                    .and_then(Result::ok)
-                    .unwrap_or_default();
-                if sender.send(Job { folder_id, file, items, thumb }).is_err() {
+                let job = if file.cloud {
+                    let _one_at_a_time = downloading.lock().unwrap();
+                    read_cloud_file(folder_id, file, ocr)
+                } else {
+                    read_file(folder_id, file, ocr)
+                };
+                if sender.send(job).is_err() {
                     break;
                 }
             });
@@ -163,6 +168,32 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     Ok(())
 }
 
+fn read_file(folder_id: i64, file: Candidate, ocr: Option<&dyn Ocr>) -> Job {
+    // A file that cannot be read is recorded with nothing to search.
+    let (items, thumb) = catch_unwind(AssertUnwindSafe(|| extract(&file, ocr)))
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    Job { folder_id, file, items, thumb, left_in_cloud: false }
+}
+
+/// Downloads a cloud file by reading it, then puts it back in the cloud. One that cannot
+/// be downloaded now, offline or on a metered connection, waits for a later pass.
+fn read_cloud_file(folder_id: i64, file: Candidate, ocr: Option<&dyn Ocr>) -> Job {
+    let wait = |file| Job { folder_id, file, items: Vec::new(), thumb: None, left_in_cloud: true };
+    if !crate::cloud::can_download() {
+        return wait(file);
+    }
+    let job = read_file(folder_id, file, ocr);
+    let still_in_cloud = std::fs::metadata(&job.file.path).map_or(true, |m| is_cloud_only(&m));
+    if job.items.is_empty() && still_in_cloud {
+        // Nothing came down: the download failed, not the file.
+        return wait(job.file);
+    }
+    crate::cloud::free_up_space(&job.file.path);
+    job
+}
+
 /// How many files are read at once: half the logical cores, so the rest of the PC
 /// stays responsive. NLSEARCH_INDEX_THREADS overrides it.
 fn extract_threads() -> usize {
@@ -176,6 +207,11 @@ fn extract_threads() -> usize {
 /// Embeds every item of the queued jobs and writes each file in one transaction.
 fn flush(conn: &Connection, engine: &Engine, state: &AppState, jobs: &mut Vec<Job>, ocr: bool) -> Result<()> {
     for job in jobs.drain(..) {
+        if job.left_in_cloud {
+            index::leave_in_cloud(conn, job.folder_id)?;
+            state.progress.lock().unwrap().done += 1;
+            continue;
+        }
         state.touch();
         let proceed = || {
             if state.cancel.load(Ordering::SeqCst) {
