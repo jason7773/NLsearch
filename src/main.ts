@@ -1,12 +1,15 @@
 import "@fontsource-variable/inter";
+import "@fontsource-variable/noto-serif-tc";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from "@tauri-apps/plugin-autostart";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { has, lang, languageChoice, setLanguageChoice, t, tn, translatePage, type LanguageChoice, type TextKey } from "./i18n";
 
 interface Hit {
   path: string;
@@ -47,13 +50,18 @@ interface Status {
   };
 }
 
+interface Preview {
+  kind: Hit["kind"];
+  sections: { page: number | null; text: string }[];
+  truncated: boolean;
+}
+
 const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 const ICONS: Record<string, string> = {
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
-  layers: svg('<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>'),
   doc: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>'),
   image: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/>'),
   folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>'),
@@ -66,30 +74,34 @@ const ICONS: Record<string, string> = {
   warn: svg('<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4.5M12 17.2v.3"/>'),
   trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),
   open: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>'),
-  lock: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   sheet: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16"/>'),
   code: svg('<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>'),
   slides: svg('<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v3M8 20h8"/>'),
   filter: svg('<path d="M4 5h16l-6 7.5V19l-4-2v-4.5L4 5Z"/>'),
+  panel: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M14.5 4v16"/>'),
+  sparkle: svg('<path d="M12 3.5 13.8 9a2 2 0 0 0 1.2 1.2l5.5 1.8-5.5 1.8a2 2 0 0 0-1.2 1.2L12 20.5 10.2 15a2 2 0 0 0-1.2-1.2L3.5 12 9 10.2A2 2 0 0 0 10.2 9L12 3.5Z"/>'),
+  copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  link: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
 };
 
 /** Example searches offered on the start screen. */
-const SUGGESTIONS = ["invoice with a total amount", "photo of a sunset", "wifi password", "rental agreement"];
+const SUGGESTIONS: TextKey[] = ["suggest.1", "suggest.2", "suggest.3", "suggest.4"];
 
 /** Colour family, icon and display name for each supported extension. */
-const FILE_TYPES: Record<string, [type: string, icon: string, label: string]> = {
-  pdf: ["pdf", "doc", "PDF"],
-  docx: ["doc", "doc", "Word document"],
-  csv: ["sheet", "sheet", "CSV"],
-  html: ["web", "code", "Web page"],
-  htm: ["web", "code", "Web page"],
-  md: ["text", "doc", "Markdown"],
-  markdown: ["text", "doc", "Markdown"],
-  rst: ["text", "doc", "Text"],
-  txt: ["text", "doc", "Text"],
-  log: ["text", "doc", "Log"],
-  xlsx: ["sheet", "sheet", "Excel workbook"],
-  pptx: ["slides", "slides", "PowerPoint"],
+const FILE_TYPES: Record<string, [type: string, icon: string, label: TextKey]> = {
+  pdf: ["pdf", "doc", "kind.pdf"],
+  docx: ["doc", "doc", "kind.word"],
+  csv: ["sheet", "sheet", "kind.csv"],
+  html: ["web", "code", "kind.web"],
+  htm: ["web", "code", "kind.web"],
+  md: ["text", "doc", "kind.markdown"],
+  markdown: ["text", "doc", "kind.markdown"],
+  rst: ["text", "doc", "kind.text"],
+  txt: ["text", "doc", "kind.text"],
+  log: ["text", "doc", "kind.log"],
+  xlsx: ["sheet", "sheet", "kind.excel"],
+  pptx: ["slides", "slides", "kind.powerpoint"],
 };
 
 /** Source code and configuration files, which are indexed as text. */
@@ -97,18 +109,22 @@ const CODE_EXTENSIONS = (
   "py js mjs cjs ts tsx jsx java kt kts scala c h cpp cc hpp cs go rs rb php swift dart lua pl r sql sh ps1 bat " +
   "cmd json yaml yml toml xml ini cfg conf css scss vue svelte ipynb"
 ).split(" ");
-for (const ext of CODE_EXTENSIONS) FILE_TYPES[ext] ??= ["code", "code", "Code"];
+for (const ext of CODE_EXTENSIONS) FILE_TYPES[ext] ??= ["code", "code", "kind.code"];
 
 /** The file type filter's choices, and the extensions each one covers. */
-const TYPE_GROUPS: [label: string, extensions: string[]][] = [
-  ["PDF", ["pdf"]],
-  ["Word", ["docx"]],
-  ["Excel and CSV", ["xlsx", "csv"]],
-  ["PowerPoint", ["pptx"]],
-  ["Text and web pages", ["txt", "md", "markdown", "rst", "log", "html", "htm"]],
-  ["Code", CODE_EXTENSIONS],
-  ["Pictures", ["jpg", "jpeg", "png", "webp", "bmp", "gif"]],
+const TYPE_GROUPS: [label: TextKey, extensions: string[]][] = [
+  ["type.pdf", ["pdf"]],
+  ["type.word", ["docx"]],
+  ["type.excel", ["xlsx", "csv"]],
+  ["type.powerpoint", ["pptx"]],
+  ["type.text", ["txt", "md", "markdown", "rst", "log", "html", "htm"]],
+  ["type.code", CODE_EXTENSIONS],
+  ["type.pictures", ["jpg", "jpeg", "png", "webp", "bmp", "gif"]],
 ];
+
+/** Results asked for at a time; "Show more" asks for this many more, up to MAX_RESULTS. */
+const PAGE = 48;
+const MAX_RESULTS = 480;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const queryEl = $<HTMLInputElement>("query");
@@ -119,16 +135,24 @@ const drawer = $("drawer");
 const backdrop = $("backdrop");
 const about = $<HTMLDialogElement>("about");
 const settings = $<HTMLDialogElement>("settings");
+const sortEl = $<HTMLSelectElement>("sort");
 
 let filter = "all";
+/** Results as the backend ranked them; `hits` is the same list in the chosen order. */
+let ranked: Hit[] = [];
 let hits: Hit[] = [];
 let selected = 0;
 let searchSeq = 0;
+let limit = PAGE;
 let debounce: number | undefined;
 let wasIndexing = false;
 let folders: Folder[] = [];
 let folderCount = 0;
 let indexing = false;
+/** Set while the list shows files like this one instead of a search. */
+let similarTo: Hit | null = null;
+
+translatePage();
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) {
   const node = document.createElement(tag);
@@ -147,14 +171,38 @@ for (const node of document.querySelectorAll<HTMLElement>("[data-icon]")) {
   node.innerHTML = ICONS[node.dataset.icon!];
 }
 
+/** Reads a stored value; storage can be missing or full, and then the default applies. */
+function stored<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function store(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Kept for this session only.
+  }
+}
+
+const megabytes = (bytes: number) => t("megabytes", { n: Math.round(bytes / 1048576) });
+const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+
 function emptyState(iconName: string, title: string, detail: string, ...extra: HTMLElement[]) {
   const box = el("div", "empty");
   const badge = el("div", "empty-icon");
   badge.append(icon(iconName));
   box.append(badge, el("h3", undefined, title), el("p", undefined, detail), ...extra);
-  resultsEl.className = "";
+  resultsEl.className = "panel";
   resultsEl.replaceChildren(box);
+  // With nothing to preview, the start screen and messages take the whole width.
+  document.body.classList.add("no-results");
   metaEl.textContent = "";
+  showPreview(null);
 }
 
 let toastTimer: number | undefined;
@@ -168,8 +216,57 @@ function toast(text: string, isError = false) {
   toastTimer = window.setTimeout(() => (node.className = ""), 3500);
 }
 
+async function copy(text: string, done: string) {
+  try {
+    await writeText(text);
+    toast(done);
+  } catch (e) {
+    toast(t("copy.failed", { error: String(e) }), true);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// History: recent searches and opened files, on this computer only.
+
+interface Recent {
+  path: string;
+  name: string;
+  kind: Hit["kind"];
+  page: number | null;
+}
+
+const HISTORY_SIZE = 8;
+
+const keepHistory = () => stored("keepHistory", true);
+const recentSearches = () => stored<string[]>("recentSearches", []);
+const recentFiles = () => stored<Recent[]>("recentFiles", []);
+
+function rememberSearch(query: string) {
+  if (!keepHistory() || !query) return;
+  const list = recentSearches().filter((q) => q.toLowerCase() !== query.toLowerCase());
+  store("recentSearches", [query, ...list].slice(0, HISTORY_SIZE));
+}
+
+function rememberFile(hit: Hit) {
+  if (!keepHistory()) return;
+  const list = recentFiles().filter((f) => f.path !== hit.path);
+  const entry: Recent = { path: hit.path, name: hit.name, kind: hit.kind, page: hit.page };
+  store("recentFiles", [entry, ...list].slice(0, HISTORY_SIZE));
+}
+
+/** A search counts as made once its results have stayed up a moment, or one is opened. */
+let rememberTimer: number | undefined;
+
+function forget(key: "recentSearches" | "recentFiles", keep: (item: never) => boolean) {
+  store(key, (stored<never[]>(key, [])).filter(keep));
+  showIdle();
+}
+
+// ---------------------------------------------------------------------------
+// Start screen
+
 function showIdle() {
-  hits = [];
+  ranked = hits = [];
   if (setup && !setup.model_installed) {
     const offerGpu = setup.gpu_supported && !setup.gpu_installed;
     const begin = (withGpu: boolean) => () => {
@@ -181,63 +278,87 @@ function showIdle() {
       "button",
       "accent",
       offerGpu
-        ? `Download model and GPU support (${megabytes(setup.model_size + setup.gpu_size)})`
-        : `Download model (${megabytes(setup.model_size)})`,
+        ? t("setup.both", { size: megabytes(setup.model_size + setup.gpu_size) })
+        : t("setup.model", { size: megabytes(setup.model_size) }),
     );
     get.prepend(icon("download"));
     get.addEventListener("click", begin(offerGpu));
     const extra: HTMLElement[] = [get];
     if (offerGpu) {
-      const modelOnly = el("button", "secondary", `Model only (${megabytes(setup.model_size)})`);
+      const modelOnly = el("button", "secondary", t("setup.modelOnly", { size: megabytes(setup.model_size) }));
       modelOnly.addEventListener("click", begin(false));
       extra.push(modelOnly);
     }
-    emptyState(
-      "download",
-      "One download to get started",
-      offerGpu
-        ? "NLsearch needs its search model. An NVIDIA graphics card was found, so GPU support is included to make indexing several times faster. Everything runs on this computer."
-        : "NLsearch needs its search model. It is downloaded once and then runs entirely on this computer.",
-      ...extra,
-    );
+    emptyState("download", t("setup.title"), offerGpu ? t("setup.detailGpu") : t("setup.detail"), ...extra);
     return;
   }
   if (!folderCount) {
-    const add = el("button", "accent", "Add folder");
+    const add = el("button", "accent", t("drawer.add"));
     add.prepend(icon("plus"));
     add.addEventListener("click", addFolder);
-    emptyState(
-      "folder",
-      "Add a folder to search",
-      "NLsearch reads the documents and pictures in the folders you choose, so you can find them by what they contain.",
-      add,
-      el("span", "hint", "You can also drag a folder here."),
-    );
+    emptyState("folder", t("addFolder.title"), t("addFolder.detail"), add, el("span", "hint", t("addFolder.drag")));
     return;
   }
+
+  const searches = keepHistory() ? recentSearches() : [];
+  const files = keepHistory() ? recentFiles() : [];
   const chips = el("div", "suggestions");
-  for (const text of SUGGESTIONS) {
-    const chip = el("button", undefined, text);
-    chip.prepend(icon("search"));
-    chip.addEventListener("click", () => {
-      queryEl.value = text;
-      queryEl.focus();
-      onQueryChanged();
-    });
+  const runQuery = (text: string) => {
+    queryEl.value = text;
+    queryEl.focus();
+    onQueryChanged();
+  };
+  for (const text of searches.length ? searches : SUGGESTIONS.map((k) => t(k))) {
+    const chip = el("button", "chip-button");
+    chip.append(icon(searches.length ? "clock" : "search"), el("span", undefined, text));
+    chip.addEventListener("click", () => runQuery(text));
+    if (searches.length) {
+      const x = el("span", "forget");
+      x.title = t("idle.forget");
+      x.append(icon("close"));
+      x.addEventListener("click", (e) => {
+        e.stopPropagation();
+        forget("recentSearches", (q: string) => q !== text);
+      });
+      chip.append(x);
+    }
     chips.append(chip);
   }
-  emptyState(
-    "search",
-    "Search your files",
-    "Find documents and pictures by what they contain, or by an exact name or number.",
+  const extra: HTMLElement[] = [
+    el("div", "idle-label", searches.length ? t("idle.recentSearches") : t("idle.try")),
     chips,
-  );
+  ];
+
+  if (files.length) {
+    const list = el("div", "recent-files");
+    for (const file of files) {
+      const row = el("button", "recent-file");
+      row.title = file.path;
+      row.append(fileBadge(file.name, file.kind), el("span", "recent-name", file.name), el("span", "recent-where", locationOf(file.path)));
+      row.addEventListener("click", () => openPath(file.path, file.name, false));
+      const x = el("span", "forget");
+      x.title = t("idle.forget");
+      x.append(icon("close"));
+      x.addEventListener("click", (e) => {
+        e.stopPropagation();
+        forget("recentFiles", (f: Recent) => f.path !== file.path);
+      });
+      row.append(x);
+      list.append(row);
+    }
+    extra.push(el("div", "idle-label", t("idle.recentFiles")), list);
+  }
+  emptyState("search", t("idle.title"), t("idle.detail"), ...extra);
 }
+
+// ---------------------------------------------------------------------------
+// Searching
 
 async function runSearch() {
   const query = queryEl.value.trim();
   const seq = ++searchSeq;
-  if (!query) {
+  clearTimeout(rememberTimer);
+  if (!query && !similarTo) {
     $("spinner").hidden = true;
     showIdle();
     return;
@@ -245,58 +366,89 @@ async function runSearch() {
   $("spinner").hidden = false;
   const started = performance.now();
   try {
-    const found = await invoke<Hit[]>("search", { query, filter, filters: activeFilters(), limit: 48 });
+    const found = similarTo
+      ? await invoke<Hit[]>("similar", { path: similarTo.path, filter, filters: activeFilters(), limit })
+      : await invoke<Hit[]>("search", { query, filter, filters: activeFilters(), limit });
     if (seq !== searchSeq) return;
-    hits = found;
-    selected = 0;
+    const keep = hits[selected]?.path;
+    ranked = found;
+    sortHits();
+    // After "Show more" or a re-sort the same file stays selected.
+    const again = hits.findIndex((h) => h.path === keep);
+    selected = again >= 0 ? again : 0;
     renderHits();
     const ms = Math.round(performance.now() - started);
-    metaEl.textContent = hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"} · ${ms} ms` : "";
+    metaEl.textContent = hits.length ? tn("meta.results", hits.length, { ms }) : "";
+    if (query && hits.length) rememberTimer = window.setTimeout(() => rememberSearch(query), 2000);
   } catch (e) {
-    if (seq === searchSeq) emptyState("close", "Search failed", String(e));
+    if (seq === searchSeq) emptyState("close", t("searchFailed.title"), String(e));
   } finally {
     if (seq === searchSeq) $("spinner").hidden = true;
   }
+}
+
+/** Puts `ranked` in the order chosen in the toolbar. */
+function sortHits() {
+  const order = sortEl.value;
+  hits = order === "relevance" ? [...ranked] : [...ranked].sort((a, b) => (order === "newest" ? b.modified - a.modified : a.modified - b.modified));
 }
 
 const STOP_WORDS = new Set(
   "a an and are as at be by do for from has have how in is it my of on or that the this to was what when where which who with".split(" "),
 );
 
-/** Wraps the query's words in <mark> wherever they occur in `text`. */
-function highlighted(text: string) {
-  const node = el("div", "snippet");
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/** The query's words as a pattern that finds them in text, or null when there are none. */
+function queryPattern() {
   // Filler words would light up half of every snippet, so they are left plain.
   const words = queryEl.value
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length > 1 && !STOP_WORDS.has(w.toLowerCase()));
-  if (!words.length) {
+    .filter((w) => (w.length > 1 || CJK.test(w)) && !STOP_WORDS.has(w.toLowerCase()));
+  if (!words.length || similarTo) return null;
+  // Latin words match whole words only, so "the" does not light up inside "clothes";
+  // Chinese has no spaces between words, so it matches anywhere.
+  const parts = words.map((w) => {
+    const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return CJK.test(w) ? escaped : `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`;
+  });
+  return new RegExp(`(${parts.join("|")})`, "giu");
+}
+
+/** Wraps the query's words in <mark> wherever they occur in `text`. */
+function highlighted(text: string, className = "snippet", tag: "div" | "p" = "div") {
+  const node = el(tag, className);
+  const pattern = queryPattern();
+  if (!pattern) {
     node.textContent = text;
     return node;
   }
-  // Whole words only: "the" must not match inside "clothes".
-  const alternatives = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(${alternatives})(?![\\p{L}\\p{N}])`, "giu");
   text.split(pattern).forEach((part, i) => node.append(i % 2 ? el("mark", undefined, part) : part));
   return node;
 }
 
 /**
- * How close a result is, in words. "Exact match" means every query word occurs
- * in the file; the other grades come from the similarity score.
+ * How close a result is, in words and as a small meter. "Exact match" means every
+ * query word occurs in the file; the other grades come from the similarity score.
  */
 function matchLabel(hit: Hit) {
   const label = el("span", "match");
+  // Cosine scores for this model sit between roughly 0.45 (unrelated) and 0.8 (very close).
+  const strength = hit.score === null ? 1 : Math.min(1, Math.max(0.08, (hit.score - 0.45) / 0.35));
+  let text: string;
   if (hit.keyword) {
     label.classList.add("strong");
-    label.textContent = "Exact match";
-  } else if (hit.score !== null) {
-    // Cosine scores for this model sit between roughly 0.45 (unrelated) and 0.8 (very close).
-    const strength = (hit.score - 0.45) / 0.35;
+    text = t("match.exact");
+  } else {
     if (strength >= 0.7) label.classList.add("strong");
-    label.textContent = strength >= 0.7 ? "Strong match" : strength >= 0.4 ? "Good match" : "Related";
+    text = strength >= 0.7 ? t("match.strong") : strength >= 0.4 ? t("match.good") : t("match.related");
   }
-  if (hit.score !== null) label.title = `Similarity ${hit.score.toFixed(2)}`;
+  const meter = el("span", "meter");
+  const fill = el("span");
+  fill.style.width = `${Math.round((hit.keyword ? Math.max(strength, 0.9) : strength) * 100)}%`;
+  meter.append(fill);
+  label.append(el("span", "match-text", text), meter);
+  if (hit.score !== null) label.title = t("match.similarity", { score: hit.score.toFixed(2) });
   return label;
 }
 
@@ -313,6 +465,31 @@ function locationOf(path: string) {
   return (short || dir).split(/[\\/]/).filter(Boolean).join(" › ");
 }
 
+/** What kind of file it is, in words: "PDF", "Word document", "PNG image". */
+function kindLabel(name: string, kind: Hit["kind"]) {
+  const ext = extension(name);
+  if (kind === "image") return t("kind.image", { ext: ext.toUpperCase() });
+  return t((FILE_TYPES[ext] ?? FILE_TYPES.txt)[2]);
+}
+
+/** The square with the file type's icon and colour. */
+function fileBadge(name: string, kind: Hit["kind"]) {
+  const ext = extension(name);
+  const [type, iconName] = kind === "image" ? ["image", "image"] : (FILE_TYPES[ext] ?? FILE_TYPES.txt);
+  const badge = el("div", "thumb filetype");
+  badge.dataset.type = type;
+  badge.append(icon(iconName), el("span", "ext", ext.slice(0, 4)));
+  return badge;
+}
+
+/** Kind · page · date · where it lives, like the detail line in a file manager. */
+function details(hit: Hit) {
+  const ext = extension(hit.name);
+  const page = hit.page ? t(ext === "pptx" ? "slide" : "page", { n: hit.page }) : "";
+  const date = new Date(hit.modified * 1000).toLocaleDateString(lang);
+  return [kindLabel(hit.name, hit.kind), page, date, locationOf(hit.path)].filter(Boolean).join("  ·  ");
+}
+
 /** Small icon button on a result; does not trigger the row's own click. */
 function action(iconName: string, title: string, run: () => void) {
   const button = el("button", "subtle");
@@ -327,16 +504,17 @@ function action(iconName: string, title: string, run: () => void) {
 
 function renderHits() {
   if (!hits.length) {
-    emptyState("search", "No results", "Try different words, or another filter.");
+    emptyState(similarTo ? "sparkle" : "search", t("noResults.title"), similarTo ? t("noSimilar.detail") : t("noResults.detail"));
     return;
   }
   const grid = filter === "images";
-  resultsEl.className = grid ? "grid" : "list";
+  resultsEl.className = "panel " + (grid ? "grid" : "list");
+  document.body.classList.remove("no-results");
 
   // Rows are reused between searches while the same file stays in the results, so
   // typing does not rebuild the list and reload every picture on each keystroke.
   const next = new Map<string, HTMLElement>();
-  const rows = hits.map((hit) => {
+  const rows: HTMLElement[] = hits.map((hit) => {
     const key = [grid, hit.path, hit.page, hit.thumb, hit.snippet, hit.modified].join("\n");
     let row = rowCache.get(key);
     if (row) {
@@ -347,12 +525,21 @@ function renderHits() {
     } else {
       row = buildRow(hit, grid);
     }
+    row.dataset.index = String(next.size);
     next.set(key, row);
     return row;
   });
   rowCache = next;
+  if (ranked.length >= limit && limit < MAX_RESULTS) {
+    const more = el("button", "more", t("more"));
+    more.addEventListener("click", () => {
+      limit += PAGE;
+      runSearch();
+    });
+    rows.push(more);
+  }
   resultsEl.replaceChildren(...rows);
-  select(selected);
+  select(Math.min(selected, hits.length - 1));
 }
 
 let rowCache = new Map<string, HTMLElement>();
@@ -360,8 +547,6 @@ let rowCache = new Map<string, HTMLElement>();
 function buildRow(hit: Hit, grid: boolean) {
   const row = el("div", grid ? "tile" : "hit");
 
-  const ext = extension(hit.name);
-  let kindLabel = `${ext.toUpperCase()} image`;
   if (hit.kind === "image") {
     const img = el("img", "thumb");
     img.loading = "lazy";
@@ -370,63 +555,204 @@ function buildRow(hit: Hit, grid: boolean) {
     img.src = hit.thumb ? convertFileSrc(hit.thumb, "thumb") : convertFileSrc(hit.path);
     row.append(img);
   } else {
-    const [type, iconName, label] = FILE_TYPES[ext] ?? ["text", "doc", "Text"];
-    kindLabel = label;
-    const badge = el("div", "thumb filetype");
-    badge.dataset.type = type;
-    badge.append(icon(iconName));
-    row.append(badge);
+    row.append(fileBadge(hit.name, hit.kind));
   }
 
   const body = el("div", "body");
   body.append(el("div", "name", hit.name));
   if (hit.snippet && !grid) body.append(highlighted(hit.snippet));
-  if (!grid) {
-    // Kind · page · date · where it lives, like the detail line in a file manager.
-    const page = hit.page ? `${ext === "pptx" ? "Slide" : "Page"} ${hit.page}` : "";
-    const date = new Date(hit.modified * 1000).toLocaleDateString();
-    const details = [kindLabel, page, date, locationOf(hit.path)];
-    body.append(el("div", "path", details.filter(Boolean).join("  ·  ")));
-  }
+  if (!grid) body.append(el("div", "path", details(hit)));
   row.append(body, matchLabel(hit));
   if (!grid) {
     const actions = el("div", "actions");
     actions.append(
-      action("open", "Open", () => openHit(hit, false)),
-      action("folder", "Show in folder", () => openHit(hit, true)),
+      action("open", t("action.open"), () => openHit(hit, false)),
+      action("folder", t("action.reveal"), () => openHit(hit, true)),
+      action("sparkle", t("action.similar"), () => findSimilar(hit)),
     );
     row.append(actions);
   }
   row.title = hit.path;
 
-  row.addEventListener("click", (e) => {
-    // The row's position changes as results update, so look it up when clicked.
-    select(Array.prototype.indexOf.call(resultsEl.children, row));
-    openHit(hit, e.ctrlKey);
-  });
+  row.addEventListener("click", () => select(Number(row.dataset.index)));
+  row.addEventListener("dblclick", (e) => openHit(hits[Number(row.dataset.index)], e.ctrlKey));
   return row;
 }
 
 function select(index: number) {
   selected = index;
   resultsEl.querySelector(".selected")?.classList.remove("selected");
-  const row = resultsEl.children[index];
+  const row = resultsEl.querySelector<HTMLElement>(`[data-index="${index}"]`);
   row?.classList.add("selected");
   row?.scrollIntoView({ block: "nearest" });
+  showPreview(hits[index] ?? null);
 }
 
-function openHit(hit: Hit, reveal: boolean) {
-  invoke(reveal ? "reveal_file" : "open_file", { path: hit.path }).catch((e) =>
-    toast(`Could not open ${hit.name}: ${e}`, true),
+function openPath(path: string, name: string, reveal: boolean) {
+  invoke(reveal ? "reveal_file" : "open_file", { path }).catch((e) =>
+    toast(t("open.failed", { name, error: String(e) }), true),
   );
 }
 
+function openHit(hit: Hit | undefined, reveal: boolean) {
+  if (!hit) return;
+  openPath(hit.path, hit.name, reveal);
+  rememberFile(hit);
+  const query = queryEl.value.trim();
+  if (query && !similarTo) rememberSearch(query);
+}
+
+/** Lists the files most like `hit`, in place of the search results. */
+function findSimilar(hit: Hit) {
+  similarTo = hit;
+  // The list is about the file now, not the words typed.
+  queryEl.value = "";
+  $("clear").hidden = true;
+  $("similar").hidden = false;
+  $("similar-text").textContent = t("similar.to", { name: hit.name });
+  $("similar").title = hit.path;
+  limit = PAGE;
+  selected = 0;
+  runSearch();
+}
+
+function leaveSimilar() {
+  if (!similarTo) return;
+  similarTo = null;
+  $("similar").hidden = true;
+  limit = PAGE;
+  runSearch();
+}
+
+$("similar-clear").addEventListener("click", () => {
+  leaveSimilar();
+  queryEl.focus();
+});
+
+// ---------------------------------------------------------------------------
+// Preview pane
+
+const previewCache = new Map<string, Promise<Preview>>();
+let previewTimer: number | undefined;
+let previewing: Hit | null = null;
+
+function previewShown() {
+  return !document.body.classList.contains("no-preview");
+}
+
+function showPreview(hit: Hit | null) {
+  previewing = hit;
+  clearTimeout(previewTimer);
+  $("preview-empty").hidden = !!hit;
+  $("preview-body").hidden = !hit;
+  if (!hit || !previewShown()) return;
+
+  $("preview-name").textContent = hit.name;
+  $("preview-name").title = hit.path;
+  $("preview-meta").textContent = details(hit);
+  const media = $("preview-media");
+  if (hit.kind === "image") {
+    const img = el("img");
+    img.decoding = "async";
+    // The stored preview shows at once; the full picture replaces it when loaded.
+    if (hit.thumb) img.src = convertFileSrc(hit.thumb, "thumb");
+    const full = new Image();
+    full.onload = () => {
+      if (previewing === hit) img.src = full.src;
+    };
+    full.src = convertFileSrc(hit.path);
+    media.className = "picture";
+    media.replaceChildren(img);
+  } else {
+    media.className = "doc";
+    media.replaceChildren(fileBadge(hit.name, hit.kind));
+  }
+  const textEl = $("preview-text");
+  textEl.replaceChildren(el("p", "preview-note", t("preview.loading")));
+
+  // Moving through the list quickly should not read every file on the way.
+  previewTimer = window.setTimeout(async () => {
+    const key = `${hit.path}\n${hit.modified}`;
+    if (!previewCache.has(key)) {
+      if (previewCache.size > 40) previewCache.clear();
+      previewCache.set(key, invoke<Preview>("preview", { path: hit.path }));
+    }
+    try {
+      const preview = await previewCache.get(key)!;
+      if (previewing === hit) renderPreviewText(hit, preview);
+    } catch (e) {
+      previewCache.delete(key);
+      if (previewing === hit) textEl.replaceChildren(el("p", "preview-note", t("preview.failed", { error: String(e) })));
+    }
+  }, 120);
+}
+
+function renderPreviewText(hit: Hit, preview: Preview) {
+  const textEl = $("preview-text");
+  const nodes: HTMLElement[] = [];
+  const ext = extension(hit.name);
+  let target: HTMLElement | null = null;
+  for (const section of preview.sections) {
+    const block = el("section");
+    if (section.page !== null && preview.sections.length > 1) {
+      block.append(el("div", "page-label", t(ext === "pptx" ? "slide" : "page", { n: section.page })));
+    }
+    for (const paragraph of section.text.split(/\n+/)) {
+      if (paragraph.trim()) block.append(highlighted(paragraph, "para", "p"));
+    }
+    if (section.page !== null && section.page === hit.page) target = block;
+    nodes.push(block);
+  }
+  if (!nodes.length && hit.kind !== "image") nodes.push(el("p", "preview-note", t("preview.none")));
+  if (preview.truncated) nodes.push(el("p", "preview-note", t("preview.truncated")));
+  textEl.replaceChildren(...nodes);
+  textEl.scrollTop = 0;
+
+  // Open where the result matched: the paragraph with the first highlighted word on
+  // its page, or else the page itself.
+  const goal = (target ?? textEl).querySelector("mark")?.closest(".para") ?? target;
+  if (goal) textEl.scrollTop += goal.getBoundingClientRect().top - textEl.getBoundingClientRect().top - 8;
+}
+
+async function copyPreviewText() {
+  const hit = previewing;
+  if (!hit) return;
+  let text = hit.snippet;
+  try {
+    const preview = await previewCache.get(`${hit.path}\n${hit.modified}`);
+    const page = preview?.sections.find((s) => s.page === hit.page) ?? preview?.sections[0];
+    if (page) text = page.text;
+  } catch {
+    // The snippet will do.
+  }
+  copy(text || hit.name, t("copied.text"));
+}
+
+$("pv-open").addEventListener("click", () => openHit(previewing ?? undefined, false));
+$("pv-reveal").addEventListener("click", () => openHit(previewing ?? undefined, true));
+$("pv-similar").addEventListener("click", () => previewing && findSimilar(previewing));
+$("pv-copy-path").addEventListener("click", () => previewing && copy(previewing.path, t("copied.path")));
+$("pv-copy-text").addEventListener("click", copyPreviewText);
+
+function setPreviewShown(show: boolean) {
+  document.body.classList.toggle("no-preview", !show);
+  $("preview-toggle").classList.toggle("on", show);
+  store("preview", show);
+  if (show) showPreview(previewing);
+}
+
+$("preview-toggle").addEventListener("click", () => setPreviewShown(!previewShown()));
+setPreviewShown(stored("preview", true));
+
+// ---------------------------------------------------------------------------
+// Folders
+
 /** The line under a folder's path: how much of it is searchable. */
 function folderState(folder: Folder) {
-  const files = `${folder.files} file${folder.files === 1 ? "" : "s"}`;
-  if (folder.pending === null) return el("div", "count warn", indexing ? "Waiting to be indexed" : "Not indexed yet");
+  const files = tn("folder.files", folder.files);
+  if (folder.pending === null) return el("div", "count warn", indexing ? t("folder.waiting") : t("folder.notIndexed"));
   if (folder.pending > 0) {
-    return el("div", "count warn", `${files} indexed · ${folder.pending} ${indexing ? "to go" : "not indexed"}`);
+    return el("div", "count warn", t(indexing ? "folder.toGo" : "folder.missing", { files, n: folder.pending }));
   }
   return el("div", "count", files);
 }
@@ -434,19 +760,18 @@ function folderState(folder: Folder) {
 /** Tells the user when search cannot see everything yet, with the way out. */
 function updateBanner() {
   const banner = $("banner");
-  const action = $("banner-action");
+  const button = $("banner-action");
   const incomplete = folders.filter((f) => f.pending !== 0);
   banner.hidden = !indexing && !incomplete.length;
   banner.classList.toggle("warn", !indexing);
   banner.querySelector(".icon")!.innerHTML = ICONS[indexing ? "info" : "warn"];
   if (indexing) {
-    $("banner-text").textContent = "Indexing your files. Some results may be missing until it finishes.";
-    action.textContent = "Stop";
+    $("banner-text").textContent = t("banner.indexing");
+    button.textContent = t("banner.stop");
   } else if (incomplete.length) {
-    const names = incomplete.map((f) => f.path.split(/[\\/]/).filter(Boolean).pop()).join(", ");
-    $("banner-text").textContent =
-      `Indexing is not finished for ${names}. Files that have not been indexed will not appear.`;
-    action.textContent = "Resume";
+    const names = incomplete.map((f) => folderName(f.path)).join(", ");
+    $("banner-text").textContent = t("banner.incomplete", { names });
+    button.textContent = t("banner.resume");
   }
 }
 
@@ -457,19 +782,15 @@ async function refreshFolders() {
   $("folder-count").hidden = !folderCount;
   $("folder-count").textContent = String(folderCount);
   if (!folders.length) {
-    foldersEl.replaceChildren(el("li", "none", "No folders yet. Add one to start searching."));
+    foldersEl.replaceChildren(el("li", "none", t("drawer.none")));
   } else {
     foldersEl.replaceChildren(
       ...folders.map((folder) => {
         const li = el("li");
         const info = el("div", "folder-info");
-        info.append(
-          el("div", "folder-name", folder.path.split(/[\\/]/).filter(Boolean).pop() ?? folder.path),
-          el("div", "path", folder.path),
-          folderState(folder),
-        );
+        info.append(el("div", "folder-name", folderName(folder.path)), el("div", "path", folder.path), folderState(folder));
         const remove = el("button", "subtle danger");
-        remove.title = "Stop searching this folder";
+        remove.title = t("drawer.remove");
         remove.append(icon("trash"));
         remove.addEventListener("click", async () => {
           await invoke("remove_folder", { id: folder.id });
@@ -483,7 +804,13 @@ async function refreshFolders() {
   }
   updateBanner();
   fillFolderFilter();
-  if (hadFolders !== folderCount > 0 && !queryEl.value.trim()) showIdle();
+  if (hadFolders !== folderCount > 0 && !queryEl.value.trim() && !similarTo) showIdle();
+}
+
+/** Indexing phases come from the backend in English. */
+function phaseText(phase: string) {
+  const key = `phase.${phase}`;
+  return has(key) ? t(key) : phase;
 }
 
 async function refreshStatus() {
@@ -496,20 +823,22 @@ async function refreshStatus() {
 
   if (p.running) {
     const file = p.current.split(/[\\/]/).pop();
-    statusEl.textContent = (p.total ? `${p.phase} ${p.done} of ${p.total}` : p.phase) + (file ? ` · ${file}` : "");
+    const phase = phaseText(p.phase);
+    statusEl.textContent =
+      (p.total ? t("status.progress", { phase, done: p.done, total: p.total }) : phase) + (file ? ` · ${file}` : "");
   } else if (p.error) {
-    statusEl.textContent = `Indexing error: ${p.error}`;
+    statusEl.textContent = t("status.error", { error: p.error });
   } else {
-    statusEl.textContent = `${s.files.toLocaleString()} files indexed`;
+    statusEl.textContent = tn("status.indexed", s.files);
   }
 
   const backend = $("backend");
   backend.hidden = !s.backend;
   const gpuAvailable = !!setup && setup.gpu_supported && !setup.gpu_installed;
-  backend.textContent = s.backend === "CUDA" ? "GPU" : gpuAvailable ? "CPU · GPU available" : s.backend;
+  backend.textContent = s.backend === "CUDA" ? t("backend.gpu") : gpuAvailable ? t("backend.cpuGpu") : s.backend;
   backend.classList.toggle("link", s.backend !== "CUDA" && gpuAvailable);
   backend.classList.toggle("on", s.engine_loaded);
-  backend.title = s.engine_loaded ? `Model loaded on ${s.backend}` : "Model unloaded; it reloads on the next search";
+  backend.title = s.engine_loaded ? t("backend.loaded", { backend: s.backend }) : t("backend.unloaded");
 
   // Folder counts while a pass runs, and fresh results once it finishes.
   if (p.running || wasIndexing) await refreshFolders();
@@ -519,7 +848,7 @@ async function refreshStatus() {
 }
 
 async function addFolder() {
-  const path = await open({ directory: true, title: "Choose a folder to search" });
+  const path = await open({ directory: true, title: t("drawer.choose") });
   if (typeof path === "string") addFolders([path]);
 }
 
@@ -530,13 +859,19 @@ async function addFolders(paths: string[]) {
   for (const path of paths) {
     try {
       await invoke("add_folder", { path });
-      added.push(path.split(/[\\/]/).filter(Boolean).pop() ?? path);
+      added.push(folderName(path));
     } catch (e) {
       // Not a folder, or already covered by a folder in the list.
-      problem = String(e).startsWith("not a folder") ? "Only folders can be added." : String(e);
+      const text = String(e);
+      const covered = text.match(/^Already searched as part of (.*)$/);
+      problem = text.startsWith("not a folder")
+        ? t("add.notFolder")
+        : covered
+          ? t("add.covered", { folder: covered[1] })
+          : text;
     }
   }
-  if (added.length) toast(`Indexing ${added.join(", ")}. You can search while it finishes.`);
+  if (added.length) toast(t("add.started", { names: added.join(", ") }));
   else toast(problem, true);
   await refreshFolders();
   refreshStatus();
@@ -550,6 +885,12 @@ function setDrawer(openState: boolean) {
 
 function onQueryChanged() {
   $("clear").hidden = !queryEl.value;
+  // Typing starts a new search, out of the similar files.
+  if (similarTo && queryEl.value.trim()) {
+    similarTo = null;
+    $("similar").hidden = true;
+  }
+  limit = PAGE;
   clearTimeout(debounce);
   debounce = window.setTimeout(runSearch, 180);
 }
@@ -562,11 +903,21 @@ $("clear").addEventListener("click", () => {
   onQueryChanged();
 });
 
+sortEl.value = stored("sort", "relevance");
+sortEl.addEventListener("change", () => {
+  store("sort", sortEl.value);
+  const keep = hits[selected]?.path;
+  sortHits();
+  selected = Math.max(0, hits.findIndex((h) => h.path === keep));
+  if (hits.length) renderHits();
+});
+
 window.addEventListener("keydown", (e) => {
   // The dialog handles its own keys, including Esc to close.
   if (about.open || settings.open) return;
   if (e.key === "Escape") {
     if (drawer.classList.contains("open")) setDrawer(false);
+    else if (similarTo) leaveSimilar();
     else getCurrentWindow().hide();
     return;
   }
@@ -583,6 +934,9 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
   } else if (e.key === "Enter") {
     openHit(hits[selected], e.ctrlKey);
+  } else if (e.key.toLowerCase() === "c" && e.ctrlKey && e.shiftKey) {
+    copy(hits[selected].path, t("copied.path"));
+    e.preventDefault();
   }
 });
 
@@ -592,6 +946,7 @@ $("filters").addEventListener("click", (e) => {
   filter = button.dataset.filter ?? "all";
   for (const b of $("filters").querySelectorAll("button")) b.classList.toggle("active", b === button);
   queryEl.focus();
+  limit = PAGE;
   runSearch();
 });
 
@@ -613,23 +968,32 @@ $("banner-action").addEventListener("click", async () => {
 async function showAbout() {
   const [name, version, s] = await Promise.all([getName(), getVersion(), invoke<Status>("status")]);
   $("about-name").textContent = name;
-  $("about-version").textContent = `Version ${version}`;
-  const device = s.backend === "CUDA" ? "GPU (NVIDIA CUDA)" : s.backend;
+  $("about-version").textContent = t("about.version", { version });
+  const device = s.backend === "CUDA" ? t("about.gpu") : s.backend;
   $("about-engine").textContent = !s.backend
-    ? "Not started yet; it loads on the first search"
-    : device + (s.engine_loaded ? "" : ", unloaded while idle");
-  $("about-index").textContent =
-    `${s.files.toLocaleString()} file${s.files === 1 ? "" : "s"} in ${folderCount} folder${folderCount === 1 ? "" : "s"}`;
+    ? t("about.notStarted")
+    : s.engine_loaded
+      ? device
+      : t("about.idle", { device });
+  $("about-index").textContent = t("about.indexSize", {
+    files: tn("folder.files", s.files),
+    folders: tn("about.folders", folderCount),
+  });
   if (!about.open) about.showModal();
 }
 
 $("about-open").addEventListener("click", showAbout);
 $("about-close").addEventListener("click", () => about.close());
-// A click on the dimmed area around the dialog closes it.
-about.addEventListener("click", (e) => {
-  if (e.target === about) about.close();
-});
+// A click on the dimmed area around a dialog closes it.
+for (const dialog of [about, settings]) {
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
+  });
+}
 listen("show-about", showAbout);
+
+// ---------------------------------------------------------------------------
+// Model and GPU downloads
 
 interface Setup {
   model_installed: boolean;
@@ -653,7 +1017,13 @@ let setup: Setup | null = null;
 let gpuQueued = false;
 let wasDownloading = false;
 
-const megabytes = (bytes: number) => `${Math.round(bytes / 1048576).toLocaleString()} MB`;
+/** Download steps come from the backend in English: "Downloading model.gguf". */
+function stepText(step: string) {
+  const [word, ...rest] = step.split(" ");
+  const file = rest.join(" ");
+  const key = `step.${word}`;
+  return has(key) ? t(key, { file }) : step;
+}
 
 /** Reads what is installed and any download in flight, and reflects it in Settings. */
 async function refreshSetup() {
@@ -662,34 +1032,36 @@ async function refreshSetup() {
   const d = setup.download;
 
   $("gpu-state").textContent = setup.gpu_installed
-    ? "Installed. Searching and indexing use your NVIDIA graphics card."
+    ? t("set.gpuInstalled")
     : setup.gpu_supported
-      ? "An NVIDIA graphics card was found. Downloading GPU support makes indexing several times faster."
-      : "No NVIDIA graphics card was found, so NLsearch runs on the processor.";
+      ? t("set.gpuFound")
+      : t("set.gpuNone");
   const gpuAction = $<HTMLButtonElement>("gpu-action");
   gpuAction.hidden = setup.gpu_installed || !setup.gpu_supported;
-  gpuAction.textContent = `Download GPU support (${megabytes(setup.gpu_size)})`;
+  gpuAction.textContent = t("set.gpuDownload", { size: megabytes(setup.gpu_size) });
   gpuAction.disabled = d.running;
 
-  $("model-state").textContent = setup.model_installed
-    ? "Installed: EmbeddingGemma 2 (8-bit)."
-    : "Not installed. NLsearch cannot search until the model is downloaded.";
+  $("model-state").textContent = setup.model_installed ? t("set.modelInstalled") : t("set.modelMissing");
   const modelAction = $<HTMLButtonElement>("model-action");
   modelAction.hidden = setup.model_installed;
-  modelAction.textContent = `Download model (${megabytes(setup.model_size)})`;
+  modelAction.textContent = t("set.modelDownload", { size: megabytes(setup.model_size) });
   modelAction.disabled = d.running;
 
   $("download").hidden = !d.running;
   if (d.running) {
     $("download-fill").style.width = `${d.total ? (d.done / d.total) * 100 : 0}%`;
-    $("download-text").textContent = `${d.step} · ${megabytes(d.done)} of ${megabytes(d.total)}`;
+    $("download-text").textContent = t("download.progress", {
+      step: stepText(d.step),
+      done: megabytes(d.done),
+      total: megabytes(d.total),
+    });
   }
   const failed = $("download-error");
   failed.hidden = d.running || !d.error;
-  failed.textContent = d.error ? `Download failed: ${d.error}. Try again to continue where it stopped.` : "";
+  failed.textContent = d.error ? t("download.failed", { error: d.error }) : "";
 
   if (wasDownloading && !d.running && !d.error && !d.cancelled) {
-    toast(d.component === "gpu" ? "GPU support is installed." : "The model is installed.");
+    toast(d.component === "gpu" ? t("download.gpuDone") : t("download.modelDone"));
     if (d.component === "model" && gpuQueued) {
       gpuQueued = false;
       startDownload("gpu");
@@ -703,10 +1075,10 @@ async function refreshSetup() {
 
   // Tell people with an NVIDIA card that GPU support exists, until they take it or decline.
   const tipWanted =
-    setup.model_installed && setup.gpu_supported && !setup.gpu_installed && !d.running && !gpuQueued && !tipDismissed();
+    setup.model_installed && setup.gpu_supported && !setup.gpu_installed && !d.running && !gpuQueued && !stored("gpuTipDismissed", false);
   $("tip").hidden = !tipWanted;
-  $("tip-action").textContent = `Download (${megabytes(setup.gpu_size)})`;
-  if (hadModel !== setup.model_installed && !queryEl.value.trim()) showIdle();
+  $("tip-action").textContent = t("tip.download", { size: megabytes(setup.gpu_size) });
+  if (hadModel !== setup.model_installed && !queryEl.value.trim() && !similarTo) showIdle();
 }
 
 async function startDownload(component: "gpu" | "model") {
@@ -718,25 +1090,12 @@ async function startDownload(component: "gpu" | "model") {
   refreshSetup();
 }
 
-/** The GPU tip stays hidden once declined; the option remains in Settings. */
-function tipDismissed() {
-  try {
-    return localStorage.getItem("gpuTipDismissed") === "1";
-  } catch {
-    return false;
-  }
-}
-
 $("tip-action").addEventListener("click", () => {
   openSettings();
   startDownload("gpu");
 });
 $("tip-dismiss").addEventListener("click", () => {
-  try {
-    localStorage.setItem("gpuTipDismissed", "1");
-  } catch {
-    // Without storage the tip simply returns next time.
-  }
+  store("gpuTipDismissed", true);
   $("tip").hidden = true;
 });
 // The status bar's CPU label leads to the GPU option when one is available.
@@ -747,6 +1106,7 @@ $("backend").addEventListener("click", () => {
 function openSettings() {
   refreshSetup();
   loadIndexSettings();
+  $<HTMLInputElement>("history-keep").checked = keepHistory();
   if (!settings.open) settings.showModal();
 }
 
@@ -762,6 +1122,9 @@ $("download-cancel").addEventListener("click", async () => {
 setInterval(() => {
   if (settings.open || setup?.download.running) refreshSetup();
 }, 700);
+
+// ---------------------------------------------------------------------------
+// Updates
 
 /** A newer release found on GitHub, if any. */
 let update: Update | null = null;
@@ -786,7 +1149,7 @@ async function checkForUpdate(quiet: boolean) {
     update = await check();
     updateChecked = true;
   } catch (e) {
-    if (!quiet) toast(`Could not check for updates: ${e}`, true);
+    if (!quiet) toast(t("update.checkFailed", { error: String(e) }), true);
     return;
   }
   showUpdate();
@@ -794,16 +1157,16 @@ async function checkForUpdate(quiet: boolean) {
 
 /** Reflects the latest check in the notice bar and in Settings. */
 async function showUpdate() {
-  const version = await getVersion();
-  const label = portable ? "Download" : "Update and restart";
+  const current = await getVersion();
+  const label = portable ? t("update.download") : t("update.install");
   $("update").hidden = !update || updateDismissed || installing;
-  $("update-text").textContent = `NLsearch ${update?.version} is available.`;
+  $("update-text").textContent = t("update.available", { version: update?.version ?? "" });
   $("update-action").textContent = label;
   $("update-state").textContent = update
-    ? `Version ${update.version} is available. You have ${version}.`
+    ? t("set.updateAvailable", { version: update.version, current })
     : updateChecked
-      ? `You have the latest version (${version}).`
-      : `You have version ${version}.`;
+      ? t("set.updateLatest", { current })
+      : t("set.updateVersion", { current });
   const install = $<HTMLButtonElement>("update-install");
   install.hidden = !update;
   install.textContent = label;
@@ -826,11 +1189,16 @@ async function installUpdate() {
     await update.downloadAndInstall((event) => {
       if (event.event === "Started") total = event.data.contentLength ?? 0;
       else if (event.event === "Progress") done += event.data.chunkLength;
-      const text = event.event === "Finished" ? "Installing…" : total ? `Downloading ${Math.round((done / total) * 100)}%` : "Downloading…";
+      const text =
+        event.event === "Finished"
+          ? t("update.installing")
+          : total
+            ? t("update.percent", { n: Math.round((done / total) * 100) })
+            : t("update.downloading");
       for (const b of buttons) b.textContent = text;
     });
   } catch (e) {
-    toast(`The update failed: ${e}`, true);
+    toast(t("update.failed", { error: String(e) }), true);
   } finally {
     installing = false;
     for (const b of buttons) b.disabled = false;
@@ -872,7 +1240,8 @@ const dateFilter = $<HTMLSelectElement>("filter-date");
 const folderFilter = $<HTMLSelectElement>("filter-folder");
 const typeFilter = $<HTMLSelectElement>("filter-type");
 
-for (const [i, [label]] of TYPE_GROUPS.entries()) typeFilter.append(new Option(label, String(i)));
+typeFilter.append(new Option(t("filter.allTypes"), ""));
+for (const [i, [label]] of TYPE_GROUPS.entries()) typeFilter.append(new Option(t(label), String(i)));
 
 /** What the filter bar asks for, in the form the search command takes. */
 function activeFilters() {
@@ -887,11 +1256,8 @@ function activeFilters() {
 /** The folder choices follow the folder list; a removed folder's choice is dropped. */
 function fillFolderFilter() {
   const chosen = folderFilter.value;
-  folderFilter.replaceChildren(new Option("All folders", ""));
-  for (const folder of folders) {
-    const name = folder.path.split(/[\\/]/).filter(Boolean).pop() ?? folder.path;
-    folderFilter.append(new Option(name, String(folder.id)));
-  }
+  folderFilter.replaceChildren(new Option(t("filter.allFolders"), ""));
+  for (const folder of folders) folderFilter.append(new Option(folderName(folder.path), String(folder.id)));
   folderFilter.value = folders.some((f) => String(f.id) === chosen) ? chosen : "";
   showFilterState();
 }
@@ -906,6 +1272,7 @@ function showFilterState() {
 for (const select of [dateFilter, folderFilter, typeFilter]) {
   select.addEventListener("change", () => {
     showFilterState();
+    limit = PAGE;
     runSearch();
   });
 }
@@ -938,8 +1305,8 @@ async function loadIndexSettings() {
   ocr.checked = indexSettings.ocr;
   ocr.disabled = !indexSettings.ocr_available && !indexSettings.ocr;
   $("ocr-state").textContent = indexSettings.ocr_available
-    ? `Finds screenshots and scanned documents by the words in them. Uses Windows' built-in OCR, with no download; indexing pictures takes longer and the index grows a little. Reads: ${indexSettings.ocr_languages.join(", ")}.`
-    : "Windows has no OCR language installed. Add one under Windows Settings › Time & language › Language & region, in the language's options.";
+    ? t("set.ocrAvailable", { languages: indexSettings.ocr_languages.join(", ") })
+    : t("set.ocrMissing");
   try {
     $<HTMLInputElement>("autostart").checked = await autostartEnabled();
   } catch {
@@ -956,7 +1323,7 @@ async function saveIndexSettings(changes: Partial<IndexSettings>, message: strin
     toast(message);
     refreshStatus();
   } catch (e) {
-    toast(`Could not save: ${e}`, true);
+    toast(t("save.failed", { error: String(e) }), true);
   }
 }
 
@@ -965,46 +1332,73 @@ $("exclude-save").addEventListener("click", () => {
     .value.split("\n")
     .map((r) => r.trim())
     .filter(Boolean);
-  saveIndexSettings({ exclude: rules }, "Saved. Skipped files are leaving the index.");
+  saveIndexSettings({ exclude: rules }, t("set.excludeSaved"));
 });
 $("ocr").addEventListener("change", (e) => {
   const on = (e.target as HTMLInputElement).checked;
-  saveIndexSettings(
-    { ocr: on },
-    on ? "Pictures and PDFs are being read again for text." : "Pictures and PDFs are being indexed again without OCR.",
-  );
+  saveIndexSettings({ ocr: on }, on ? t("set.ocrStarted") : t("set.ocrStopped"));
 });
 $("autostart").addEventListener("change", async (e) => {
   const on = (e.target as HTMLInputElement).checked;
   try {
     await (on ? enableAutostart() : disableAutostart());
   } catch (err) {
-    toast(`Could not change start-up: ${err}`, true);
+    toast(t("set.autostartFailed", { error: String(err) }), true);
     (e.target as HTMLInputElement).checked = !on;
   }
 });
 
+$("history-keep").addEventListener("change", (e) => {
+  store("keepHistory", (e.target as HTMLInputElement).checked);
+  if (!queryEl.value.trim() && !similarTo) showIdle();
+});
+$("history-clear").addEventListener("click", () => {
+  store("recentSearches", []);
+  store("recentFiles", []);
+  toast(t("set.historyCleared"));
+  if (!queryEl.value.trim() && !similarTo) showIdle();
+});
+
 // ---------------------------------------------------------------------------
-// Appearance: follow Windows, or always light or dark.
+// Language: the page is translated as it loads, so a change reloads it.
+
+const languageEl = $<HTMLSelectElement>("language");
+languageEl.value = languageChoice();
+languageEl.addEventListener("change", () => {
+  setLanguageChoice(languageEl.value as LanguageChoice);
+  location.reload();
+});
+invoke("set_tray_labels", { show: t("tray.show"), about: t("tray.about"), quit: t("tray.quit") }).catch(() => {
+  // The tray keeps its English labels.
+});
+
+// ---------------------------------------------------------------------------
+// Appearance: glass or paper, each light or dark, and light or dark following Windows.
 
 type ThemeChoice = "system" | "light" | "dark";
+type Style = "glass" | "paper";
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 function themeChoice(): ThemeChoice {
-  try {
-    const saved = localStorage.getItem("theme");
-    if (saved === "light" || saved === "dark") return saved;
-  } catch {
-    // Without storage the system setting applies.
-  }
-  return "system";
+  const saved = stored<string>("themeChoice", "system");
+  return saved === "light" || saved === "dark" ? saved : "system";
+}
+
+function styleChoice(): Style {
+  return stored<string>("style", "glass") === "paper" ? "paper" : "glass";
 }
 
 function applyTheme(choice: ThemeChoice) {
   const dark = choice === "dark" || (choice === "system" && systemDark.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.style = styleChoice();
   for (const b of document.querySelectorAll<HTMLElement>("#theme button")) {
     const on = b.dataset.theme === choice;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+  for (const b of document.querySelectorAll<HTMLElement>("#style button")) {
+    const on = b.dataset.style === styleChoice();
     b.classList.toggle("active", on);
     b.setAttribute("aria-checked", String(on));
   }
@@ -1012,11 +1406,7 @@ function applyTheme(choice: ThemeChoice) {
 
 /** The title bar follows the chosen look too; null hands it back to Windows. */
 async function chooseTheme(choice: ThemeChoice) {
-  try {
-    localStorage.setItem("theme", choice);
-  } catch {
-    // The choice lasts until NLsearch closes.
-  }
+  store("themeChoice", choice);
   try {
     await getCurrentWindow().setTheme(choice === "system" ? null : choice);
   } catch {
@@ -1028,6 +1418,12 @@ async function chooseTheme(choice: ThemeChoice) {
 
 for (const b of document.querySelectorAll<HTMLElement>("#theme button")) {
   b.addEventListener("click", () => chooseTheme(b.dataset.theme as ThemeChoice));
+}
+for (const b of document.querySelectorAll<HTMLElement>("#style button")) {
+  b.addEventListener("click", () => {
+    store("style", b.dataset.style);
+    applyTheme(themeChoice());
+  });
 }
 systemDark.addEventListener("change", () => applyTheme(themeChoice()));
 applyTheme(themeChoice());
@@ -1045,6 +1441,8 @@ getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   }
 });
 
-refreshSetup().then(refreshFolders).then(showIdle);
+refreshSetup().then(refreshFolders).then(() => {
+  if (!queryEl.value.trim() && !similarTo) showIdle();
+});
 refreshStatus();
 setInterval(refreshStatus, 1500);

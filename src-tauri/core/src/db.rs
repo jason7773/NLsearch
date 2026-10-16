@@ -234,6 +234,21 @@ impl VecCache {
         self.data.extend_from_slice(vec);
     }
 
+    /// The average direction of a file's vectors, normalised: what the file is about as
+    /// a whole. None when the file has no vectors.
+    pub fn file_vector(&self, file_id: i64) -> Option<Vec<f32>> {
+        let mut sum = vec![0f32; DIM];
+        let mut found = false;
+        for (i, v) in self.data.chunks_exact(DIM).enumerate() {
+            if self.files[i] == file_id {
+                found = true;
+                sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
+            }
+        }
+        let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
+        (found && norm > 0.0).then(|| sum.iter().map(|x| x / norm).collect())
+    }
+
     /// Top `k` (chunk id, cosine) pairs among chunks whose kind and file pass `allow`.
     pub fn top_k(&self, query: &[f32], k: usize, allow: impl Fn(u8, i64) -> bool) -> Vec<(i64, f32)> {
         let mut scored: Vec<(i64, f32)> = self

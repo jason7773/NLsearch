@@ -8,6 +8,7 @@
     "core:window:allow-hide",
     "core:window:allow-set-theme",
     "dialog:allow-open",
+    "clipboard-manager:allow-write-text",
     "updater:default",
     "autostart:default"
   ]

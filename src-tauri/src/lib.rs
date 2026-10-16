@@ -322,18 +322,60 @@ fn search(
     let qvec = embedded.map_err(err)?.remove(0);
 
     let semantic = {
-        let mut cache = state.cache.lock().unwrap();
-        if state.cache_dirty.swap(false, Ordering::SeqCst) {
-            *cache = VecCache::load(&conn).map_err(|e| {
-                state.cache_dirty.store(true, Ordering::SeqCst);
-                err(e)
-            })?;
-        }
-        cache.top_k(&qvec, search::SEMANTIC_CANDIDATES, |kind, file| {
+        let cache = loaded_cache(&state, &conn)?;
+        cache.top_k(&qvec, search::candidates(limit), |kind, file| {
             search::allows(&filter, kind) && allowed.as_ref().map_or(true, |a| a.contains(&file))
         })
     };
     search::rank(&conn, &semantic, query, &filter, allowed.as_ref(), limit).map_err(err)
+}
+
+/// The vector cache, read again from the index first if it changed.
+fn loaded_cache<'a>(state: &'a AppState, conn: &rusqlite::Connection) -> CmdResult<std::sync::MutexGuard<'a, VecCache>> {
+    let mut cache = state.cache.lock().unwrap();
+    if state.cache_dirty.swap(false, Ordering::SeqCst) {
+        *cache = VecCache::load(conn).map_err(|e| {
+            state.cache_dirty.store(true, Ordering::SeqCst);
+            err(e)
+        })?;
+    }
+    Ok(cache)
+}
+
+/// Files with content like the one at `path`. Needs no model: the file's own vectors are the query.
+#[tauri::command(async)]
+fn similar(
+    state: State<AppState>,
+    path: String,
+    filter: String,
+    filters: Option<Filters>,
+    limit: usize,
+) -> CmdResult<Vec<Hit>> {
+    let conn = db::open(&state.db_path).map_err(err)?;
+    let allowed = search::allowed_files(&conn, &filters.unwrap_or_default()).map_err(err)?;
+    let cache = loaded_cache(&state, &conn)?;
+    search::similar(&conn, &cache, &path, &filter, allowed.as_ref(), limit).map_err(err)
+}
+
+/// The indexed text of one file, for the preview pane.
+#[tauri::command(async)]
+fn preview(state: State<AppState>, path: String) -> CmdResult<search::Preview> {
+    let conn = db::open(&state.db_path).map_err(err)?;
+    search::preview(&conn, &path).map_err(err)
+}
+
+/// The tray menu's items, kept so the window can put them in the user's language.
+struct TrayItems {
+    show: MenuItem<tauri::Wry>,
+    about: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+
+#[tauri::command]
+fn set_tray_labels(items: State<TrayItems>, show: String, about: String, quit: String) -> CmdResult<()> {
+    items.show.set_text(show).map_err(err)?;
+    items.about.set_text(about).map_err(err)?;
+    items.quit.set_text(quit).map_err(err)
 }
 
 /// A portable copy cannot install updates over itself; it only points to the download.
@@ -442,6 +484,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -520,6 +563,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            app.manage(TrayItems { show, about, quit });
 
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -550,6 +594,9 @@ pub fn run() {
             download_component,
             cancel_download,
             search,
+            similar,
+            preview,
+            set_tray_labels,
             open_file,
             reveal_file,
             is_portable,
