@@ -984,6 +984,55 @@ $("autostart").addEventListener("change", async (e) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Appearance: follow Windows, or always light or dark.
+
+type ThemeChoice = "system" | "light" | "dark";
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+function themeChoice(): ThemeChoice {
+  try {
+    const saved = localStorage.getItem("theme");
+    if (saved === "light" || saved === "dark") return saved;
+  } catch {
+    // Without storage the system setting applies.
+  }
+  return "system";
+}
+
+function applyTheme(choice: ThemeChoice) {
+  const dark = choice === "dark" || (choice === "system" && systemDark.matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  for (const b of document.querySelectorAll<HTMLElement>("#theme button")) {
+    const on = b.dataset.theme === choice;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", String(on));
+  }
+}
+
+/** The title bar follows the chosen look too; null hands it back to Windows. */
+async function chooseTheme(choice: ThemeChoice) {
+  try {
+    localStorage.setItem("theme", choice);
+  } catch {
+    // The choice lasts until NLsearch closes.
+  }
+  try {
+    await getCurrentWindow().setTheme(choice === "system" ? null : choice);
+  } catch {
+    // An older shell without the permission keeps its title bar as it is.
+  }
+  // Once the window theme is back on the system's, the media query reports Windows' own.
+  applyTheme(choice);
+}
+
+for (const b of document.querySelectorAll<HTMLElement>("#theme button")) {
+  b.addEventListener("click", () => chooseTheme(b.dataset.theme as ThemeChoice));
+}
+systemDark.addEventListener("change", () => applyTheme(themeChoice()));
+applyTheme(themeChoice());
+chooseTheme(themeChoice());
+
 getCurrentWebview().onDragDropEvent(({ payload }) => {
   $("drop").hidden = payload.type !== "enter" && payload.type !== "over";
   if (payload.type === "drop") addFolders(payload.paths);
