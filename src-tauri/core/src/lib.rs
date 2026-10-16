@@ -8,5 +8,8 @@ pub mod index;
 pub mod search;
 pub mod text;
 
+// The OCR hook takes images in this crate's types.
+pub use image;
+
 #[cfg(test)]
 mod testing;

@@ -4,6 +4,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from "@tauri-apps/plugin-autostart";
 import { open } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
@@ -17,6 +18,8 @@ interface Hit {
   keyword: boolean;
   /** Key of the stored preview, for images. */
   thumb: string | null;
+  /** Last modified, in seconds since 1970. */
+  modified: number;
 }
 
 interface Folder {
@@ -66,6 +69,8 @@ const ICONS: Record<string, string> = {
   lock: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   sheet: svg('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16"/>'),
   code: svg('<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>'),
+  slides: svg('<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v3M8 20h8"/>'),
+  filter: svg('<path d="M4 5h16l-6 7.5V19l-4-2v-4.5L4 5Z"/>'),
 };
 
 /** Example searches offered on the start screen. */
@@ -83,7 +88,27 @@ const FILE_TYPES: Record<string, [type: string, icon: string, label: string]> = 
   rst: ["text", "doc", "Text"],
   txt: ["text", "doc", "Text"],
   log: ["text", "doc", "Log"],
+  xlsx: ["sheet", "sheet", "Excel workbook"],
+  pptx: ["slides", "slides", "PowerPoint"],
 };
+
+/** Source code and configuration files, which are indexed as text. */
+const CODE_EXTENSIONS = (
+  "py js mjs cjs ts tsx jsx java kt kts scala c h cpp cc hpp cs go rs rb php swift dart lua pl r sql sh ps1 bat " +
+  "cmd json yaml yml toml xml ini cfg conf css scss vue svelte ipynb"
+).split(" ");
+for (const ext of CODE_EXTENSIONS) FILE_TYPES[ext] ??= ["code", "code", "Code"];
+
+/** The file type filter's choices, and the extensions each one covers. */
+const TYPE_GROUPS: [label: string, extensions: string[]][] = [
+  ["PDF", ["pdf"]],
+  ["Word", ["docx"]],
+  ["Excel and CSV", ["xlsx", "csv"]],
+  ["PowerPoint", ["pptx"]],
+  ["Text and web pages", ["txt", "md", "markdown", "rst", "log", "html", "htm"]],
+  ["Code", CODE_EXTENSIONS],
+  ["Pictures", ["jpg", "jpeg", "png", "webp", "bmp", "gif"]],
+];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const queryEl = $<HTMLInputElement>("query");
@@ -220,7 +245,7 @@ async function runSearch() {
   $("spinner").hidden = false;
   const started = performance.now();
   try {
-    const found = await invoke<Hit[]>("search", { query, filter, limit: 48 });
+    const found = await invoke<Hit[]>("search", { query, filter, filters: activeFilters(), limit: 48 });
     if (seq !== searchSeq) return;
     hits = found;
     selected = 0;
@@ -312,7 +337,7 @@ function renderHits() {
   // typing does not rebuild the list and reload every picture on each keystroke.
   const next = new Map<string, HTMLElement>();
   const rows = hits.map((hit) => {
-    const key = [grid, hit.path, hit.page, hit.thumb, hit.snippet].join("\n");
+    const key = [grid, hit.path, hit.page, hit.thumb, hit.snippet, hit.modified].join("\n");
     let row = rowCache.get(key);
     if (row) {
       row.classList.remove("selected");
@@ -357,8 +382,10 @@ function buildRow(hit: Hit, grid: boolean) {
   body.append(el("div", "name", hit.name));
   if (hit.snippet && !grid) body.append(highlighted(hit.snippet));
   if (!grid) {
-    // Kind · page · where it lives, like the detail line in a file manager.
-    const details = [kindLabel, hit.page ? `Page ${hit.page}` : "", locationOf(hit.path)];
+    // Kind · page · date · where it lives, like the detail line in a file manager.
+    const page = hit.page ? `${ext === "pptx" ? "Slide" : "Page"} ${hit.page}` : "";
+    const date = new Date(hit.modified * 1000).toLocaleDateString();
+    const details = [kindLabel, page, date, locationOf(hit.path)];
     body.append(el("div", "path", details.filter(Boolean).join("  ·  ")));
   }
   row.append(body, matchLabel(hit));
@@ -455,6 +482,7 @@ async function refreshFolders() {
     );
   }
   updateBanner();
+  fillFolderFilter();
   if (hadFolders !== folderCount > 0 && !queryEl.value.trim()) showIdle();
 }
 
@@ -718,6 +746,7 @@ $("backend").addEventListener("click", () => {
 
 function openSettings() {
   refreshSetup();
+  loadIndexSettings();
   if (!settings.open) settings.showModal();
 }
 
@@ -835,6 +864,125 @@ invoke<boolean>("is_portable").then((p) => {
 setInterval(() => {
   if (autoUpdate()) checkForUpdate(true);
 }, UPDATE_INTERVAL);
+
+// ---------------------------------------------------------------------------
+// Filters: date, folder and file type, on top of the kind tabs.
+
+const dateFilter = $<HTMLSelectElement>("filter-date");
+const folderFilter = $<HTMLSelectElement>("filter-folder");
+const typeFilter = $<HTMLSelectElement>("filter-type");
+
+for (const [i, [label]] of TYPE_GROUPS.entries()) typeFilter.append(new Option(label, String(i)));
+
+/** What the filter bar asks for, in the form the search command takes. */
+function activeFilters() {
+  const days = Number(dateFilter.value);
+  return {
+    since: days ? Math.floor(Date.now() / 1000) - days * 86400 : null,
+    folder: folderFilter.value ? Number(folderFilter.value) : null,
+    extensions: typeFilter.value ? TYPE_GROUPS[Number(typeFilter.value)][1] : [],
+  };
+}
+
+/** The folder choices follow the folder list; a removed folder's choice is dropped. */
+function fillFolderFilter() {
+  const chosen = folderFilter.value;
+  folderFilter.replaceChildren(new Option("All folders", ""));
+  for (const folder of folders) {
+    const name = folder.path.split(/[\\/]/).filter(Boolean).pop() ?? folder.path;
+    folderFilter.append(new Option(name, String(folder.id)));
+  }
+  folderFilter.value = folders.some((f) => String(f.id) === chosen) ? chosen : "";
+  showFilterState();
+}
+
+/** The filter button lights up while a filter is narrowing the results. */
+function showFilterState() {
+  const active = !!(dateFilter.value || folderFilter.value || typeFilter.value);
+  $("filters-toggle").classList.toggle("on", active || !$("filterbar").hidden);
+  $("filters-clear").hidden = !active;
+}
+
+for (const select of [dateFilter, folderFilter, typeFilter]) {
+  select.addEventListener("change", () => {
+    showFilterState();
+    runSearch();
+  });
+}
+$("filters-toggle").addEventListener("click", () => {
+  $("filterbar").hidden = !$("filterbar").hidden;
+  showFilterState();
+});
+$("filters-clear").addEventListener("click", () => {
+  dateFilter.value = folderFilter.value = typeFilter.value = "";
+  showFilterState();
+  runSearch();
+});
+
+// ---------------------------------------------------------------------------
+// Settings that change what is indexed, and start-up.
+
+interface IndexSettings {
+  exclude: string[];
+  ocr: boolean;
+  ocr_languages: string[];
+  ocr_available: boolean;
+}
+
+let indexSettings: IndexSettings | null = null;
+
+async function loadIndexSettings() {
+  indexSettings = await invoke<IndexSettings>("get_settings");
+  $<HTMLTextAreaElement>("exclude").value = indexSettings.exclude.join("\n");
+  const ocr = $<HTMLInputElement>("ocr");
+  ocr.checked = indexSettings.ocr;
+  ocr.disabled = !indexSettings.ocr_available && !indexSettings.ocr;
+  $("ocr-state").textContent = indexSettings.ocr_available
+    ? `Finds screenshots and scanned documents by the words in them. Uses Windows' built-in OCR, with no download; indexing pictures takes longer and the index grows a little. Reads: ${indexSettings.ocr_languages.join(", ")}.`
+    : "Windows has no OCR language installed. Add one under Windows Settings › Time & language › Language & region, in the language's options.";
+  try {
+    $<HTMLInputElement>("autostart").checked = await autostartEnabled();
+  } catch {
+    $<HTMLInputElement>("autostart").disabled = true;
+  }
+}
+
+async function saveIndexSettings(changes: Partial<IndexSettings>, message: string) {
+  if (!indexSettings) return;
+  const next = { exclude: indexSettings.exclude, ocr: indexSettings.ocr, ...changes };
+  try {
+    await invoke("save_settings", { settings: { exclude: next.exclude, ocr: next.ocr } });
+    Object.assign(indexSettings, next);
+    toast(message);
+    refreshStatus();
+  } catch (e) {
+    toast(`Could not save: ${e}`, true);
+  }
+}
+
+$("exclude-save").addEventListener("click", () => {
+  const rules = $<HTMLTextAreaElement>("exclude")
+    .value.split("\n")
+    .map((r) => r.trim())
+    .filter(Boolean);
+  saveIndexSettings({ exclude: rules }, "Saved. Skipped files are leaving the index.");
+});
+$("ocr").addEventListener("change", (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  saveIndexSettings(
+    { ocr: on },
+    on ? "Pictures and PDFs are being read again for text." : "Pictures and PDFs are being indexed again without OCR.",
+  );
+});
+$("autostart").addEventListener("change", async (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  try {
+    await (on ? enableAutostart() : disableAutostart());
+  } catch (err) {
+    toast(`Could not change start-up: ${err}`, true);
+    (e.target as HTMLInputElement).checked = !on;
+  }
+});
 
 getCurrentWebview().onDragDropEvent(({ payload }) => {
   $("drop").hidden = payload.type !== "enter" && payload.type !== "over";

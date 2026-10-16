@@ -23,10 +23,29 @@
           <button data-filter="images" role="tab">Images</button>
         </div>
         <span id="meta"></span>
+        <button id="filters-toggle" class="subtle" title="Filter by date, folder or file type">
+          <span class="icon" data-icon="filter"></span>
+        </button>
         <button id="folders-toggle" title="Choose which folders are searched">
           <span class="icon" data-icon="folder"></span>Folders<span id="folder-count" hidden></span>
         </button>
         <button id="settings-open" class="subtle" title="Settings"><span class="icon" data-icon="gear"></span></button>
+      </div>
+      <div id="filterbar" hidden>
+        <select id="filter-date" title="Last modified">
+          <option value="">Any time</option>
+          <option value="1">Past day</option>
+          <option value="7">Past week</option>
+          <option value="31">Past month</option>
+          <option value="365">Past year</option>
+        </select>
+        <select id="filter-folder" title="Folder">
+          <option value="">All folders</option>
+        </select>
+        <select id="filter-type" title="File type">
+          <option value="">All file types</option>
+        </select>
+        <button id="filters-clear" class="subtle">Clear</button>
       </div>
     </header>
 
@@ -95,6 +114,26 @@
         <h3>Search model</h3>
         <p id="model-state"></p>
         <button id="model-action" class="accent" hidden></button>
+      </section>
+
+      <section>
+        <h3>Start-up</h3>
+        <label class="check"><input id="autostart" type="checkbox" /> Start NLsearch in the tray when you sign in</label>
+      </section>
+
+      <section>
+        <h3>Text in pictures (OCR)</h3>
+        <p id="ocr-state"></p>
+        <label class="check"><input id="ocr" type="checkbox" /> Read text in pictures and scanned PDFs</label>
+      </section>
+
+      <section>
+        <h3>Skipped folders and files</h3>
+        <p>One per line: a name such as <code>Archive</code>, a pattern such as <code>*.tmp</code>, or a full path. Hidden folders and program folders such as <code>node_modules</code> are always skipped.</p>
+        <textarea id="exclude" rows="4" spellcheck="false" placeholder="Archive&#10;*.tmp&#10;D:\Photos\Old"></textarea>
+        <div class="section-actions">
+          <button id="exclude-save">Save</button>
+        </div>
       </section>
 
       <section>

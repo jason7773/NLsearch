@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Mutex};
 
 use anyhow::Result;
-use nlsearch_core::db;
-use nlsearch_core::extract::{extract, scan, Candidate, Item};
+use nlsearch_core::db::{self, Settings};
+use nlsearch_core::extract::{extract, scan, Candidate, Exclusions, Item, Ocr};
 use nlsearch_core::index::{self, EMBED_BATCH};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, Manager};
@@ -60,6 +60,13 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     let cancelled = || state.cancel.load(Ordering::SeqCst);
     let conn = db::open(&state.db_path)?;
     index::tidy(&conn)?;
+    let settings = Settings::load(&conn)?;
+    let exclusions = Exclusions::new(&settings.exclude);
+    // OCR counts as on only when Windows can do it, so files are not redone every pass
+    // on a PC without an OCR language.
+    let ocr_engine = if settings.ocr { crate::ocr::engine() } else { None };
+    let ocr: Option<&dyn Ocr> = ocr_engine.as_ref().map(|o| o as &dyn Ocr);
+    let ocr_on = ocr.is_some();
     let folders: Vec<(i64, String)> = conn
         .prepare("SELECT id, path FROM folders")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -76,7 +83,7 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
     // Work out what changed before loading the model.
     let mut todo: Vec<(i64, Candidate)> = Vec::new();
     for (folder_id, folder) in &folders {
-        let changed = index::plan_folder(&conn, *folder_id, scan(Path::new(folder)))?;
+        let changed = index::plan_folder(&conn, *folder_id, scan(Path::new(folder), &exclusions), ocr_on)?;
         todo.extend(changed.into_iter().map(|file| (*folder_id, file)));
     }
     state.cache_dirty.store(true, Ordering::SeqCst);
@@ -107,7 +114,7 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
                 }
                 let Some((folder_id, file)) = queue.lock().unwrap().next() else { break };
                 // A file that cannot be read is recorded with nothing to search.
-                let (items, thumb) = catch_unwind(AssertUnwindSafe(|| extract(&file)))
+                let (items, thumb) = catch_unwind(AssertUnwindSafe(|| extract(&file, ocr)))
                     .ok()
                     .and_then(Result::ok)
                     .unwrap_or_default();
@@ -129,7 +136,7 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
             pending += job.items.len();
             jobs.push(job);
             if pending >= EMBED_BATCH {
-                result = flush(&conn, &engine, state, &mut jobs);
+                result = flush(&conn, &engine, state, &mut jobs, ocr_on);
                 pending = 0;
                 emit(app, state);
                 if result.is_err() {
@@ -138,7 +145,7 @@ fn run_pass(app: &AppHandle, state: &AppState) -> Result<()> {
             }
         }
         if result.is_ok() {
-            result = flush(&conn, &engine, state, &mut jobs);
+            result = flush(&conn, &engine, state, &mut jobs, ocr_on);
         }
         // Readers still waiting to hand over a file stop once nobody is listening.
         drop(receiver);
@@ -159,7 +166,7 @@ fn extract_threads() -> usize {
 }
 
 /// Embeds every item of the queued jobs and writes each file in one transaction.
-fn flush(conn: &Connection, engine: &Engine, state: &AppState, jobs: &mut Vec<Job>) -> Result<()> {
+fn flush(conn: &Connection, engine: &Engine, state: &AppState, jobs: &mut Vec<Job>, ocr: bool) -> Result<()> {
     for job in jobs.drain(..) {
         state.touch();
         let proceed = || {
@@ -177,12 +184,12 @@ fn flush(conn: &Connection, engine: &Engine, state: &AppState, jobs: &mut Vec<Jo
         // The cache lock is held across the commit so a concurrent reload either sees
         // all of this file's vectors in the database or gets them appended, never both.
         let mut cache = state.cache.lock().unwrap();
-        let added = index::write_file(conn, job.folder_id, &job.file, rows, job.thumb.as_deref())?;
+        let (file_id, added) = index::write_file(conn, job.folder_id, &job.file, rows, job.thumb.as_deref(), ocr)?;
         // A cache already marked stale is reloaded whole by the next search.
         if !state.cache_dirty.load(Ordering::SeqCst) {
             let kind = db::kind_code(job.file.kind);
             for (id, vec) in &added {
-                cache.push(*id, kind, vec);
+                cache.push(*id, file_id, kind, vec);
             }
         }
         drop(cache);

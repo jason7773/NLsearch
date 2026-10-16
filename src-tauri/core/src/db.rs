@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 
 use crate::embed::{DIM, MODEL_ID};
 use crate::text;
@@ -55,6 +56,11 @@ pub fn open(path: &Path) -> Result<Connection> {
         .exists([])?;
     if !has_pending {
         conn.execute_batch("ALTER TABLE folders ADD COLUMN pending INTEGER")?;
+    }
+    // Whether a picture or PDF was read with OCR, so changing the setting redoes them.
+    let has_ocr = conn.prepare("SELECT 1 FROM pragma_table_info('files') WHERE name = 'ocr'")?.exists([])?;
+    if !has_ocr {
+        conn.execute_batch("ALTER TABLE files ADD COLUMN ocr INTEGER NOT NULL DEFAULT 0")?;
     }
 
     build_keyword_index(&mut conn)?;
@@ -126,6 +132,32 @@ fn build_keyword_index(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// What the user chose in Settings that changes what gets indexed. Kept in the index
+/// itself, so a portable copy carries it along.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct Settings {
+    /// Rules for `extract::Exclusions`.
+    pub exclude: Vec<String>,
+    /// Read text in pictures and scanned PDFs.
+    pub ocr: bool,
+}
+
+impl Settings {
+    pub fn load(conn: &Connection) -> Result<Settings> {
+        let stored: Option<String> =
+            conn.query_row("SELECT value FROM meta WHERE key = 'settings'", [], |r| r.get(0)).ok();
+        Ok(stored.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default())
+    }
+
+    pub fn save(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', ?1)",
+            params![serde_json::to_string(self)?],
+        )?;
+        Ok(())
+    }
+}
+
 pub fn delete_file(conn: &Connection, file_id: i64) -> Result<()> {
     conn.execute("DELETE FROM chunks WHERE file_id = ?1", params![file_id])?;
     conn.execute("DELETE FROM thumbs WHERE file_id = ?1", params![file_id])?;
@@ -167,6 +199,8 @@ pub fn kind_code(kind: &str) -> u8 {
 #[derive(Default)]
 pub struct VecCache {
     pub ids: Vec<i64>,
+    /// The file each vector belongs to, for the search filters.
+    pub files: Vec<i64>,
     pub kinds: Vec<u8>,
     pub data: Vec<f32>,
 }
@@ -175,16 +209,17 @@ impl VecCache {
     pub fn load(conn: &Connection) -> Result<VecCache> {
         let mut cache = VecCache::default();
         let mut stmt = conn.prepare(
-            "SELECT c.id, f.kind, c.emb FROM chunks c JOIN files f ON f.id = c.file_id",
+            "SELECT c.id, c.file_id, f.kind, c.emb FROM chunks c JOIN files f ON f.id = c.file_id",
         )?;
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
-            let blob = row.get_ref(2)?.as_blob()?;
+            let blob = row.get_ref(3)?.as_blob()?;
             if blob.len() != DIM * 4 {
                 continue;
             }
             cache.ids.push(row.get(0)?);
-            cache.kinds.push(kind_code(&row.get::<_, String>(1)?));
+            cache.files.push(row.get(1)?);
+            cache.kinds.push(kind_code(&row.get::<_, String>(2)?));
             cache.data.extend(
                 blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
             );
@@ -192,19 +227,20 @@ impl VecCache {
         Ok(cache)
     }
 
-    pub fn push(&mut self, id: i64, kind: u8, vec: &[f32]) {
+    pub fn push(&mut self, id: i64, file_id: i64, kind: u8, vec: &[f32]) {
         self.ids.push(id);
+        self.files.push(file_id);
         self.kinds.push(kind);
         self.data.extend_from_slice(vec);
     }
 
-    /// Top `k` (chunk id, cosine) pairs among chunks whose kind passes `allow`.
-    pub fn top_k(&self, query: &[f32], k: usize, allow: impl Fn(u8) -> bool) -> Vec<(i64, f32)> {
+    /// Top `k` (chunk id, cosine) pairs among chunks whose kind and file pass `allow`.
+    pub fn top_k(&self, query: &[f32], k: usize, allow: impl Fn(u8, i64) -> bool) -> Vec<(i64, f32)> {
         let mut scored: Vec<(i64, f32)> = self
             .data
             .chunks_exact(DIM)
             .enumerate()
-            .filter(|(i, _)| allow(self.kinds[*i]))
+            .filter(|(i, _)| allow(self.kinds[*i], self.files[*i]))
             .map(|(i, v)| (self.ids[i], v.iter().zip(query).map(|(a, b)| a * b).sum()))
             .collect();
         scored.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));

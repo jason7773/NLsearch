@@ -1,6 +1,8 @@
 mod engine;
 mod indexer;
+mod ocr;
 mod setup;
+mod watcher;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -16,14 +18,16 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
-use nlsearch_core::db::{self, VecCache};
+use nlsearch_core::db::{self, Settings, VecCache};
 use nlsearch_core::embed::Embedder;
-use nlsearch_core::search::{self, Hit};
+use nlsearch_core::search::{self, Filters, Hit};
 
 use engine::Engine;
 
 const RELEASES: &str = "https://github.com/jason7773/NLsearch/releases/latest";
 const HOTKEY: &str = "ctrl+shift+space";
+/// Passed when Windows starts NLsearch at sign-in, so it opens in the tray only.
+const HIDDEN_ARG: &str = "--hidden";
 /// The helper process is stopped after this long without use, freeing VRAM.
 const ENGINE_IDLE: Duration = Duration::from_secs(300);
 
@@ -58,6 +62,10 @@ pub struct AppState {
     pub cache_dirty: AtomicBool,
     /// Searches currently waiting on the model; the indexer yields to them.
     pub searching: AtomicUsize,
+    /// Watches the indexed folders; replaced when they change.
+    pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// Tells the watcher thread that something changed.
+    pub watch_sender: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 impl AppState {
@@ -223,6 +231,7 @@ fn add_folder(app: AppHandle, state: State<AppState>, path: String) -> CmdResult
     }
     // Folders inside the new one are folded into it when the next pass starts.
     conn.execute("INSERT OR IGNORE INTO folders (path) VALUES (?1)", params![path]).map_err(err)?;
+    watcher::refresh(&app);
     indexer::start(app);
     Ok(())
 }
@@ -241,6 +250,7 @@ fn remove_folder(app: AppHandle, state: State<AppState>, id: i64) -> CmdResult<(
     let conn = db::open(&state.db_path).map_err(err)?;
     db::delete_folder(&conn, id).map_err(err)?;
     state.cache_dirty.store(true, Ordering::SeqCst);
+    watcher::refresh(&app);
     if was_indexing {
         indexer::start(app);
     }
@@ -259,13 +269,51 @@ fn stop_indexing(state: State<AppState>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
 
+#[derive(Serialize)]
+struct SettingsView {
+    #[serde(flatten)]
+    settings: Settings,
+    /// Languages Windows can read with OCR; empty when it cannot.
+    ocr_languages: Vec<String>,
+    /// OCR works with the languages of the user's Windows profile.
+    ocr_available: bool,
+}
+
 #[tauri::command(async)]
-fn search(state: State<AppState>, query: String, filter: String, limit: usize) -> CmdResult<Vec<Hit>> {
+fn get_settings(state: State<AppState>) -> CmdResult<SettingsView> {
+    let conn = db::open(&state.db_path).map_err(err)?;
+    Ok(SettingsView {
+        settings: Settings::load(&conn).map_err(err)?,
+        ocr_languages: ocr::languages(),
+        ocr_available: ocr::engine().is_some(),
+    })
+}
+
+/// Saves the settings and indexes again: excluded files drop out, files no longer
+/// excluded come in, and pictures and PDFs are read again when OCR changes.
+#[tauri::command(async)]
+fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> CmdResult<()> {
+    let conn = db::open(&state.db_path).map_err(err)?;
+    settings.save(&conn).map_err(err)?;
+    watcher::refresh(&app);
+    indexer::start(app);
+    Ok(())
+}
+
+#[tauri::command(async)]
+fn search(
+    state: State<AppState>,
+    query: String,
+    filter: String,
+    filters: Option<Filters>,
+    limit: usize,
+) -> CmdResult<Vec<Hit>> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
     }
     let conn = db::open(&state.db_path).map_err(err)?;
+    let allowed = search::allowed_files(&conn, &filters.unwrap_or_default()).map_err(err)?;
 
     let engine = state.engine().map_err(err)?;
     state.searching.fetch_add(1, Ordering::SeqCst);
@@ -281,9 +329,11 @@ fn search(state: State<AppState>, query: String, filter: String, limit: usize) -
                 err(e)
             })?;
         }
-        cache.top_k(&qvec, search::SEMANTIC_CANDIDATES, |kind| search::allows(&filter, kind))
+        cache.top_k(&qvec, search::SEMANTIC_CANDIDATES, |kind, file| {
+            search::allows(&filter, kind) && allowed.as_ref().map_or(true, |a| a.contains(&file))
+        })
     };
-    search::rank(&conn, &semantic, query, &filter, limit).map_err(err)
+    search::rank(&conn, &semantic, query, &filter, allowed.as_ref(), limit).map_err(err)
 }
 
 /// A portable copy cannot install updates over itself; it only points to the download.
@@ -393,6 +443,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![HIDDEN_ARG]),
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -424,7 +478,14 @@ pub fn run() {
                 cache: Mutex::new(VecCache::default()),
                 cache_dirty: AtomicBool::new(true),
                 searching: AtomicUsize::new(0),
+                watcher: Mutex::new(None),
+                watch_sender: Mutex::new(None),
             });
+
+            // The window starts hidden (see tauri.conf.json) so a start at sign-in stays in the tray.
+            if !std::env::args().any(|a| a == HIDDEN_ARG) {
+                show_window(app.handle());
+            }
 
             // Another app may already own the hotkey; the tray icon still works.
             if let Err(e) = app.global_shortcut().register(HOTKEY) {
@@ -466,8 +527,9 @@ pub fn run() {
                 handle.state::<AppState>().stop_engine_if_idle();
             });
 
-            // Pick up files that changed while the app was closed.
+            // Pick up files that changed while the app was closed, then follow changes.
             indexer::start(app.handle().clone());
+            watcher::start(app.handle().clone());
             Ok(())
         })
         // Closing the window keeps the app in the tray; Quit is in the tray menu.
@@ -491,7 +553,9 @@ pub fn run() {
             open_file,
             reveal_file,
             is_portable,
-            open_downloads
+            open_downloads,
+            get_settings,
+            save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

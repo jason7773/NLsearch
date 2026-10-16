@@ -33,8 +33,12 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 - 🖼️ **Image search** by what a picture shows, with a thumbnail grid
 - ⚡ **GPU acceleration** on NVIDIA cards, with automatic CPU fallback
 - 🔄 **Incremental indexing** that only processes new or changed files
+- 👀 **Live updates**: new, edited and deleted files are picked up as they change
+- 🧭 **Filters** by date, folder and file type
+- 🔤 **Text in pictures** (optional): screenshots and scanned PDFs found by their words, with Windows' built-in OCR
+- 🚫 **Skip rules** for folders and files you never want searched
 - ⏸️ **Stop and resume** indexing at any time, with a warning while a folder is incomplete
-- ⌨️ **Global hotkey** (`Ctrl+Shift+Space`) and a tray icon
+- ⌨️ **Global hotkey** (`Ctrl+Shift+Space`), a tray icon, and an optional start at sign-in
 - 🔒 **Private and read-only**: files are never changed, moved or uploaded
 - 📦 **Portable**: runs from a folder with no installation
 - ⬆️ **Updates itself**: a new release is offered in the app and installs with one click
@@ -43,7 +47,9 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 
 | Kind | Extensions |
 |---|---|
-| Text | `txt` `md` `markdown` `rst` `log` `csv` `html` `htm` `docx` |
+| Text | `txt` `md` `markdown` `rst` `log` `csv` `html` `htm` |
+| Office | `docx` `xlsx` `pptx` (slides found by number) |
+| Code | `py` `js` `ts` `java` `c` `cpp` `cs` `go` `rs` `json` `yaml` `xml` `sql` and other source and config files |
 | PDF | `pdf` (text layer, indexed per page) |
 | Images | `jpg` `jpeg` `png` `webp` `bmp` `gif` |
 
@@ -86,8 +92,13 @@ Only an up-to-date NVIDIA driver is needed. The CUDA toolkit is not.
 
 - **Tabs** switch between All, Documents and Images.
 - **Exact match** marks results that contain every word you typed.
-- **Rescan**, in the Folders panel, picks up files added, changed or deleted since the last pass.
-  A rescan also runs each time the app starts.
+- **Filters** (the funnel next to **Folders**) narrow results by date, folder and file type.
+- Folders are watched while NLsearch runs, so changes are indexed within seconds. **Rescan**, in the
+  Folders panel, checks everything again, and a rescan also runs each time the app starts.
+- **Settings** has the rest: start at sign-in, skip rules (names such as `Archive`, patterns such as
+  `*.tmp`, or full paths), and **Read text in pictures and scanned PDFs**. That last one is off by
+  default: it makes indexing pictures slower and needs an OCR language installed in Windows
+  (Settings › Time & language › Language & region). Up to 50 scanned pages are read per PDF.
 - Closing the window keeps NLsearch in the tray. To quit, right-click the tray icon and choose **Quit**.
 
 ## Privacy
