@@ -59,9 +59,10 @@ Measured in a Linux container without the model (Hit@5 / MRR@10, fused):
 | before: every query word as an exact phrase | 0.18 / 0.18 | 0.80 / 0.74 |
 | after: character pairs ranked by bm25 | 0.79 / 0.75 | 0.84 / 0.79 |
 
-Vector scan over 100,000 passages (4 cores, one thread): 105 ms before, about 45 ms
+Vector scan over 100,000 passages (4 cores): 105 ms and 293 MB at first; about 45 ms
 after selecting the top results instead of sorting all of them and vectorising the dot
-product.
+product; about 9 ms and 74 MB once the cache holds 8-bit vectors and large caches are
+scanned on every core. The 8-bit vectors left the fused scores unchanged.
 
 Numbers with EmbeddingGemma 2 still need a run on Windows with `eval-zh.ps1`.
 

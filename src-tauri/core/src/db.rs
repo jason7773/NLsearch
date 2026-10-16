@@ -195,15 +195,22 @@ pub fn kind_code(kind: &str) -> u8 {
     }
 }
 
-/// Every vector in memory, as one flat matrix, for brute-force search.
+/// Every vector in memory, as one flat matrix, for brute-force search. Vectors are kept
+/// as 8-bit integers with one scale each, a quarter of the memory of 32-bit floats; the
+/// cosine they give is within about 0.002 of the exact one. The index keeps full floats.
 #[derive(Default)]
 pub struct VecCache {
     pub ids: Vec<i64>,
     /// The file each vector belongs to, for the search filters.
     pub files: Vec<i64>,
     pub kinds: Vec<u8>,
-    pub data: Vec<f32>,
+    pub data: Vec<i8>,
+    /// Per vector: the value of one step of `data`.
+    pub scales: Vec<f32>,
 }
+
+/// Below this many vectors a search scans on one thread; starting threads costs more.
+const PARALLEL_MIN: usize = 16_384;
 
 impl VecCache {
     pub fn load(conn: &Connection) -> Result<VecCache> {
@@ -212,17 +219,16 @@ impl VecCache {
             "SELECT c.id, c.file_id, f.kind, c.emb FROM chunks c JOIN files f ON f.id = c.file_id",
         )?;
         let mut rows = stmt.query([])?;
+        let mut vec = vec![0f32; DIM];
         while let Some(row) = rows.next()? {
             let blob = row.get_ref(3)?.as_blob()?;
             if blob.len() != DIM * 4 {
                 continue;
             }
-            cache.ids.push(row.get(0)?);
-            cache.files.push(row.get(1)?);
-            cache.kinds.push(kind_code(&row.get::<_, String>(2)?));
-            cache.data.extend(
-                blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-            );
+            for (x, b) in vec.iter_mut().zip(blob.chunks_exact(4)) {
+                *x = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            }
+            cache.push(row.get(0)?, row.get(1)?, kind_code(&row.get::<_, String>(2)?), &vec);
         }
         Ok(cache)
     }
@@ -231,7 +237,10 @@ impl VecCache {
         self.ids.push(id);
         self.files.push(file_id);
         self.kinds.push(kind);
-        self.data.extend_from_slice(vec);
+        let max = vec.iter().fold(0f32, |m, x| m.max(x.abs()));
+        let scale = if max > 0.0 { max / 127.0 } else { 1.0 };
+        self.data.extend(vec.iter().map(|x| (x / scale).round() as i8));
+        self.scales.push(scale);
     }
 
     /// The average direction of a file's vectors, normalised: what the file is about as
@@ -242,7 +251,8 @@ impl VecCache {
         for (i, v) in self.data.chunks_exact(DIM).enumerate() {
             if self.files[i] == file_id {
                 found = true;
-                sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
+                let scale = self.scales[i];
+                sum.iter_mut().zip(v).for_each(|(s, x)| *s += *x as f32 * scale);
             }
         }
         let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -250,34 +260,62 @@ impl VecCache {
     }
 
     /// Top `k` (chunk id, cosine) pairs among chunks whose kind and file pass `allow`.
-    pub fn top_k(&self, query: &[f32], k: usize, allow: impl Fn(u8, i64) -> bool) -> Vec<(i64, f32)> {
-        let mut scored: Vec<(i64, f32)> = self
-            .data
-            .chunks_exact(DIM)
-            .enumerate()
-            .filter(|(i, _)| allow(self.kinds[*i], self.files[*i]))
-            .map(|(i, v)| (self.ids[i], dot(v, query)))
-            .collect();
-        // Only the best k need sorting: set them apart first, which is linear.
-        let by_score = |a: &(i64, f32), b: &(i64, f32)| b.1.total_cmp(&a.1);
-        if scored.len() > k && k > 0 {
-            scored.select_nth_unstable_by(k - 1, by_score);
-        }
-        scored.truncate(k);
+    /// Large caches are scanned in parallel, one slice per core.
+    pub fn top_k(&self, query: &[f32], k: usize, allow: impl Fn(u8, i64) -> bool + Sync) -> Vec<(i64, f32)> {
+        let n = self.ids.len();
+        let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(8);
+        let mut scored = if n < PARALLEL_MIN || threads < 2 {
+            self.scan(0..n, query, k, &allow)
+        } else {
+            let per = n.div_ceil(threads);
+            std::thread::scope(|scope| {
+                let parts: Vec<_> = (0..n)
+                    .step_by(per)
+                    .map(|start| {
+                        let allow = &allow;
+                        scope.spawn(move || self.scan(start..(start + per).min(n), query, k, allow))
+                    })
+                    .collect();
+                parts.into_iter().flat_map(|p| p.join().unwrap()).collect()
+            })
+        };
+        best(&mut scored, k);
         scored.sort_unstable_by(by_score);
+        scored
+    }
+
+    /// The best `k` of the vectors in `range`, unordered.
+    fn scan(&self, range: std::ops::Range<usize>, query: &[f32], k: usize, allow: &impl Fn(u8, i64) -> bool) -> Vec<(i64, f32)> {
+        let mut scored: Vec<(i64, f32)> = range
+            .filter(|&i| allow(self.kinds[i], self.files[i]))
+            .map(|i| (self.ids[i], dot(&self.data[i * DIM..(i + 1) * DIM], query) * self.scales[i]))
+            .collect();
+        best(&mut scored, k);
         scored
     }
 }
 
+fn by_score(a: &(i64, f32), b: &(i64, f32)) -> std::cmp::Ordering {
+    b.1.total_cmp(&a.1)
+}
+
+/// Keeps the best `k`, unordered. Setting them apart is linear; sorting all would not be.
+fn best(scored: &mut Vec<(i64, f32)>, k: usize) {
+    if scored.len() > k && k > 0 {
+        scored.select_nth_unstable_by(k - 1, by_score);
+    }
+    scored.truncate(k);
+}
+
 /// Dot product in eight independent lanes, which the compiler turns into SIMD; a plain
 /// running sum has to add in order and cannot be vectorised.
-fn dot(a: &[f32], b: &[f32]) -> f32 {
+fn dot(a: &[i8], b: &[f32]) -> f32 {
     let mut lanes = [0f32; 8];
     let (ca, cb) = (a.chunks_exact(8), b.chunks_exact(8));
-    let tail: f32 = ca.remainder().iter().zip(cb.remainder()).map(|(x, y)| x * y).sum();
+    let tail: f32 = ca.remainder().iter().zip(cb.remainder()).map(|(x, y)| *x as f32 * y).sum();
     for (x, y) in ca.zip(cb) {
         for i in 0..8 {
-            lanes[i] += x[i] * y[i];
+            lanes[i] += x[i] as f32 * y[i];
         }
     }
     lanes.iter().sum::<f32>() + tail
@@ -334,4 +372,76 @@ pub fn merge_nested_folders(conn: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embed::normalize;
+    use std::collections::{HashMap, HashSet};
+
+    /// Unit vectors from a fixed pseudo-random sequence.
+    fn vectors(n: usize, seed: u64) -> Vec<Vec<f32>> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                let mut v: Vec<f32> = (0..DIM)
+                    .map(|_| {
+                        s ^= s << 13;
+                        s ^= s >> 7;
+                        s ^= s << 17;
+                        (s >> 40) as f32 / (1u64 << 24) as f32 - 0.5
+                    })
+                    .collect();
+                normalize(&mut v);
+                v
+            })
+            .collect()
+    }
+
+    #[test]
+    fn eight_bit_scan_matches_exact_cosine() {
+        // Enough vectors for the parallel path.
+        let docs = vectors(PARALLEL_MIN + 1000, 7);
+        let mut cache = VecCache::default();
+        for (i, v) in docs.iter().enumerate() {
+            cache.push(i as i64, (i / 3) as i64, 0, v);
+        }
+        for query in vectors(5, 99) {
+            let mut exact: Vec<(i64, f32)> = docs
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (i as i64, v.iter().zip(&query).map(|(a, b)| a * b).sum()))
+                .collect();
+            exact.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let got = cache.top_k(&query, 50, |_, _| true);
+            assert_eq!(got.len(), 50);
+            assert!(got.windows(2).all(|w| w[0].1 >= w[1].1));
+            let exact_score: HashMap<i64, f32> = exact.iter().copied().collect();
+            for (id, score) in &got {
+                assert!((score - exact_score[id]).abs() < 0.005, "{score} vs {}", exact_score[id]);
+            }
+            // The best match is found, and nearly all of the best 50.
+            assert_eq!(got[0].0, exact[0].0);
+            let top: HashSet<i64> = exact[..50].iter().map(|(id, _)| *id).collect();
+            assert!(got.iter().filter(|(id, _)| top.contains(id)).count() >= 45);
+        }
+        // Filters apply on every thread.
+        let odd = cache.top_k(&docs[0], 10, |_, file| file % 2 == 1);
+        assert!(odd.iter().all(|(id, _)| (id / 3) % 2 == 1));
+    }
+
+    #[test]
+    fn file_vector_averages_a_files_passages() {
+        let mut cache = VecCache::default();
+        let mut a = vec![0f32; DIM];
+        a[0] = 1.0;
+        let mut b = vec![0f32; DIM];
+        b[1] = 1.0;
+        cache.push(1, 10, 0, &a);
+        cache.push(2, 10, 0, &b);
+        let v = cache.file_vector(10).unwrap();
+        assert!((v[0] - 0.7071).abs() < 0.001 && (v[1] - 0.7071).abs() < 0.001);
+        assert!(cache.file_vector(11).is_none());
+    }
 }
