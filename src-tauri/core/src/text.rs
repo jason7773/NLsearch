@@ -235,6 +235,41 @@ pub fn fts_query(query: &str) -> String {
         .join(" ")
 }
 
+/// The FTS5 query that ranks the keyword side. Latin words and numbers are terms of their own;
+/// a run of CJK characters becomes its overlapping character pairs, each a two-character
+/// phrase, since a natural-language question rarely appears in a passage word for word.
+/// Any term may match, and bm25 ranks passages that share more, and rarer, terms first.
+/// Empty when the query has no words.
+pub fn fts_query_any(query: &str) -> String {
+    let folded: String = query.chars().map(fold).collect();
+    let mut terms: Vec<String> = Vec::new();
+    for word in folded.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+        let chars: Vec<char> = word.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let cjk = is_cjk(chars[i]);
+            let start = i;
+            while i < chars.len() && is_cjk(chars[i]) == cjk {
+                i += 1;
+            }
+            let run = &chars[start..i];
+            if !cjk {
+                terms.push(format!("\"{}\"", run.iter().collect::<String>()));
+            } else if run.len() == 1 {
+                terms.push(format!("\"{}\"", run[0]));
+            } else {
+                for pair in run.windows(2) {
+                    let term = format!("\"{} {}\"", pair[0], pair[1]);
+                    if !terms.contains(&term) {
+                        terms.push(term);
+                    }
+                }
+            }
+        }
+    }
+    terms.join(" OR ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +300,15 @@ mod tests {
         assert_eq!(fts_query("房租 多少"), "\"房 租\" \"多 少\"");
         assert_eq!(fts_query("invoice 2024-03"), "\"invoice\" \"2024\" \"03\"");
         assert_eq!(fts_query("  ?! "), "");
+    }
+
+    #[test]
+    fn builds_pair_queries() {
+        assert_eq!(fts_query_any("房租多少"), "\"房 租\" OR \"租 多\" OR \"多 少\"");
+        assert_eq!(fts_query_any("2024年3月電費"), "\"2024\" OR \"年\" OR \"3\" OR \"月 電\" OR \"電 費\"");
+        assert_eq!(fts_query_any("Hausman 檢定"), "\"Hausman\" OR \"檢 定\"");
+        assert_eq!(fts_query_any("臺北 台北"), "\"台 北\"");
+        assert_eq!(fts_query_any("  ?! "), "");
     }
 
     #[test]

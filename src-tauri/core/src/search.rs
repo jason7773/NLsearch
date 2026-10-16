@@ -22,6 +22,7 @@ pub struct Hit {
     pub snippet: String,
     /// Cosine similarity; absent for hits found by keyword only.
     pub score: Option<f32>,
+    /// Every query word occurs in the passage as typed: shown as an exact match.
     pub keyword: bool,
     /// Key of the stored preview, for images: pass it to the `thumb` protocol.
     pub thumb: Option<String>,
@@ -101,29 +102,19 @@ pub fn rank(
     allowed: Option<&HashSet<i64>>,
     limit: usize,
 ) -> Result<Vec<Hit>> {
-    // Exact-match side: every query word must appear in the passage.
-    let fts_query = text::fts_query(query);
-    let mut keyword: Vec<i64> = Vec::new();
-    if !fts_query.is_empty() {
-        let mut stmt = conn.prepare(
-            "SELECT c.id, f.kind, f.id FROM chunks_fts
-             JOIN chunks c ON c.id = chunks_fts.rowid
-             JOIN files f ON f.id = c.file_id
-             WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2",
-        )?;
-        // Filters throw many matches away, so look further down the list.
-        let depth = if allowed.is_some() { 2000 } else { 100 };
-        let rows = stmt.query_map(params![fts_query, depth], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
-        })?;
-        for row in rows {
-            let (id, kind, file_id) = row?;
-            if allows(filter, db::kind_code(&kind)) && allowed.map_or(true, |a| a.contains(&file_id)) {
-                keyword.push(id);
-            }
-        }
-        keyword.truncate(100);
-    }
+    // Keyword side, ranked by bm25 over the query's words and character pairs, so a
+    // question finds passages that share its key words without containing it whole.
+    // Passages holding every query word, as typed, are marked as exact matches.
+    let exact = keyword_ids(conn, &text::fts_query(query), filter, allowed)?;
+    let candidates: HashSet<i64> = semantic.iter().map(|(id, _)| *id).collect();
+    let keyword: Vec<i64> = keyword_ids(conn, &text::fts_query_any(query), filter, allowed)?
+        .into_iter()
+        // A passage that only shares a few characters, and that the model did not pick
+        // either, is noise: it would show without a similarity score.
+        .filter(|id| semantic.is_empty() || candidates.contains(id) || exact.contains(id))
+        .take(100)
+        .collect();
+    let exact: HashSet<i64> = exact.into_iter().collect();
 
     // Reciprocal rank fusion of the two rankings.
     let rrf = |rank: usize| 1.0 / (60.0 + rank as f64);
@@ -132,9 +123,9 @@ pub fn rank(
         fused.insert(*id, (rrf(rank), Some(*score), false));
     }
     for (rank, id) in keyword.iter().enumerate() {
-        let entry = fused.entry(*id).or_insert((0.0, None, true));
+        let entry = fused.entry(*id).or_insert((0.0, None, false));
         entry.0 += rrf(rank);
-        entry.2 = true;
+        entry.2 = exact.contains(id);
     }
     let mut ranked: Vec<_> = fused.into_iter().collect();
     // Ties go to the lower chunk id, so equal scores come out the same every time.
@@ -181,6 +172,33 @@ pub fn rank(
         hits.push(Hit { path, name, kind, page, snippet, score, keyword, thumb, modified: mtime });
     }
     Ok(hits)
+}
+
+/// Chunk ids matching an FTS5 query, best first, among those `filter` and `allowed`
+/// let through. Empty for an empty query.
+fn keyword_ids(conn: &Connection, fts_query: &str, filter: &str, allowed: Option<&HashSet<i64>>) -> Result<Vec<i64>> {
+    let mut ids = Vec::new();
+    if fts_query.is_empty() {
+        return Ok(ids);
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT c.id, f.kind, f.id FROM chunks_fts
+         JOIN chunks c ON c.id = chunks_fts.rowid
+         JOIN files f ON f.id = c.file_id
+         WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2",
+    )?;
+    // Filters throw many matches away, so look further down the list.
+    let depth = if allowed.is_some() { 2000 } else { 400 };
+    let rows = stmt.query_map(params![fts_query, depth], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+    })?;
+    for row in rows {
+        let (id, kind, file_id) = row?;
+        if allows(filter, db::kind_code(&kind)) && allowed.map_or(true, |a| a.contains(&file_id)) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 /// Files whose content is closest to the file at `path` as a whole, best first, leaving

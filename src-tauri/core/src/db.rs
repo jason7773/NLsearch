@@ -256,12 +256,31 @@ impl VecCache {
             .chunks_exact(DIM)
             .enumerate()
             .filter(|(i, _)| allow(self.kinds[*i], self.files[*i]))
-            .map(|(i, v)| (self.ids[i], v.iter().zip(query).map(|(a, b)| a * b).sum()))
+            .map(|(i, v)| (self.ids[i], dot(v, query)))
             .collect();
-        scored.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+        // Only the best k need sorting: set them apart first, which is linear.
+        let by_score = |a: &(i64, f32), b: &(i64, f32)| b.1.total_cmp(&a.1);
+        if scored.len() > k && k > 0 {
+            scored.select_nth_unstable_by(k - 1, by_score);
+        }
         scored.truncate(k);
+        scored.sort_unstable_by(by_score);
         scored
     }
+}
+
+/// Dot product in eight independent lanes, which the compiler turns into SIMD; a plain
+/// running sum has to add in order and cannot be vectorised.
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut lanes = [0f32; 8];
+    let (ca, cb) = (a.chunks_exact(8), b.chunks_exact(8));
+    let tail: f32 = ca.remainder().iter().zip(cb.remainder()).map(|(x, y)| x * y).sum();
+    for (x, y) in ca.zip(cb) {
+        for i in 0..8 {
+            lanes[i] += x[i] * y[i];
+        }
+    }
+    lanes.iter().sum::<f32>() + tail
 }
 
 /// A folder path in comparable form: no trailing separator, and lower case on
