@@ -1,10 +1,7 @@
-mod db;
 mod engine;
 mod indexer;
 mod setup;
-mod text;
 
-use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Condvar;
@@ -19,8 +16,11 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
-use db::VecCache;
-use engine::{Engine, Input};
+use nlsearch_core::db::{self, VecCache};
+use nlsearch_core::embed::Embedder;
+use nlsearch_core::search::{self, Hit};
+
+use engine::Engine;
 
 const RELEASES: &str = "https://github.com/jason7773/NLsearch/releases/latest";
 const HOTKEY: &str = "ctrl+shift+space";
@@ -259,36 +259,17 @@ fn stop_indexing(state: State<AppState>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
 
-#[derive(Serialize)]
-struct Hit {
-    path: String,
-    name: String,
-    kind: String,
-    page: Option<i64>,
-    snippet: String,
-    /// Cosine similarity; absent for hits found by keyword only.
-    score: Option<f32>,
-    keyword: bool,
-    /// Key of the stored preview, for images: pass it to the `thumb` protocol.
-    thumb: Option<String>,
-}
-
 #[tauri::command(async)]
 fn search(state: State<AppState>, query: String, filter: String, limit: usize) -> CmdResult<Vec<Hit>> {
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let allow = |kind: u8| match filter.as_str() {
-        "docs" => kind != db::KIND_IMAGE,
-        "images" => kind == db::KIND_IMAGE,
-        _ => true,
-    };
     let conn = db::open(&state.db_path).map_err(err)?;
 
     let engine = state.engine().map_err(err)?;
     state.searching.fetch_add(1, Ordering::SeqCst);
-    let embedded = engine.embed(&[Input::Text(format!("task: search result | query: {query}"))]);
+    let embedded = engine.embed(&[search::query_input(query)]);
     state.searching.fetch_sub(1, Ordering::SeqCst);
     let qvec = embedded.map_err(err)?.remove(0);
 
@@ -300,88 +281,9 @@ fn search(state: State<AppState>, query: String, filter: String, limit: usize) -
                 err(e)
             })?;
         }
-        cache.top_k(&qvec, 200, allow)
+        cache.top_k(&qvec, search::SEMANTIC_CANDIDATES, |kind| search::allows(&filter, kind))
     };
-
-    // Exact-match side: every query word must appear in the passage.
-    let fts_query = text::fts_query(query);
-    let mut keyword: Vec<i64> = Vec::new();
-    if !fts_query.is_empty() {
-        let mut stmt = conn
-            .prepare(
-                "SELECT c.id, f.kind FROM chunks_fts
-                 JOIN chunks c ON c.id = chunks_fts.rowid
-                 JOIN files f ON f.id = c.file_id
-                 WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT 100",
-            )
-            .map_err(err)?;
-        let rows = stmt
-            .query_map(params![fts_query], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-            .map_err(err)?;
-        for row in rows {
-            let (id, kind) = row.map_err(err)?;
-            if allow(db::kind_code(&kind)) {
-                keyword.push(id);
-            }
-        }
-    }
-
-    // Reciprocal rank fusion of the two rankings.
-    let rrf = |rank: usize| 1.0 / (60.0 + rank as f64);
-    let mut fused: HashMap<i64, (f64, Option<f32>, bool)> = HashMap::new();
-    for (rank, (id, score)) in semantic.iter().enumerate() {
-        fused.insert(*id, (rrf(rank), Some(*score), false));
-    }
-    for (rank, id) in keyword.iter().enumerate() {
-        let entry = fused.entry(*id).or_insert((0.0, None, true));
-        entry.0 += rrf(rank);
-        entry.2 = true;
-    }
-    let mut ranked: Vec<_> = fused.into_iter().collect();
-    ranked.sort_unstable_by(|a, b| b.1 .0.total_cmp(&a.1 .0));
-
-    // Best passage per file.
-    let mut stmt = conn
-        .prepare(
-            "SELECT f.path, f.kind, c.page, c.text, f.id, f.mtime FROM chunks c
-             JOIN files f ON f.id = c.file_id WHERE c.id = ?1",
-        )
-        .map_err(err)?;
-    let mut seen = HashSet::new();
-    let mut hits = Vec::new();
-    for (id, (_, score, keyword)) in ranked {
-        if hits.len() >= limit {
-            break;
-        }
-        let row = stmt.query_row(params![id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<i64>>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-                r.get::<_, i64>(5)?,
-            ))
-        });
-        // The chunk may have been removed by the indexer since the cache was loaded.
-        let Ok((path, kind, page, text, file_id, mtime)) = row else { continue };
-        if !seen.insert(path.clone()) {
-            continue;
-        }
-        let name = std::path::Path::new(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let snippet = if kind == "image" {
-            String::new()
-        } else {
-            text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(260).collect()
-        };
-        // The modification time makes the key change when the file does, so previews can be cached.
-        let thumb = (kind == "image").then(|| format!("{file_id}-{mtime}"));
-        hits.push(Hit { path, name, kind, page, snippet, score, keyword, thumb });
-    }
-    Ok(hits)
+    search::rank(&conn, &semantic, query, &filter, limit).map_err(err)
 }
 
 /// A portable copy cannot install updates over itself; it only points to the download.
@@ -442,7 +344,7 @@ fn thumb_response(state: &AppState, key: &str) -> anyhow::Result<Vec<u8>> {
     let mut free = SLOTS.1.wait_while(SLOTS.0.lock().unwrap(), |n| *n == 0).unwrap();
     *free -= 1;
     drop(free);
-    let made = indexer::make_thumb(std::path::Path::new(&path));
+    let made = nlsearch_core::extract::make_thumb(std::path::Path::new(&path));
     *SLOTS.0.lock().unwrap() += 1;
     SLOTS.1.notify_one();
 
