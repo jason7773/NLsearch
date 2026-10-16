@@ -17,6 +17,8 @@ pub struct Engine {
     child: Child,
     client: HttpEmbedder,
     pub backend: &'static str,
+    /// Whether the picture encoder is loaded, so pictures can be embedded.
+    pub vision: bool,
 }
 
 impl Drop for Engine {
@@ -28,8 +30,9 @@ impl Drop for Engine {
 
 impl Engine {
     /// `roots` are the runtime folders to look in, in order: downloaded parts first,
-    /// then what shipped with the app.
-    pub fn start(roots: &[PathBuf], log_dir: &Path) -> Result<Engine> {
+    /// then what shipped with the app. The picture encoder is loaded only with `vision`:
+    /// it takes more memory than the text model, and text vectors do not depend on it.
+    pub fn start(roots: &[PathBuf], log_dir: &Path, vision: bool) -> Result<Engine> {
         let find = |file: &str| {
             locate(roots, &format!("models/{file}")).with_context(|| format!("model file missing: {file}"))
         };
@@ -42,7 +45,7 @@ impl Engine {
             if backend == "CUDA" && !has_cuda_device(&exe) {
                 continue;
             }
-            match spawn(&exe, &model, &mmproj, ngl, backend, log_dir) {
+            match spawn(&exe, &model, vision.then_some(&mmproj), ngl, backend, log_dir) {
                 Ok(engine) => return Ok(engine),
                 Err(e) => errors.push(format!("{backend}: {e:#}")),
             }
@@ -88,7 +91,7 @@ fn has_cuda_device(exe: &Path) -> bool {
 fn spawn(
     exe: &Path,
     model: &PathBuf,
-    mmproj: &PathBuf,
+    mmproj: Option<&PathBuf>,
     ngl: &str,
     backend: &'static str,
     log_dir: &Path,
@@ -96,13 +99,22 @@ fn spawn(
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let log = File::create(log_dir.join(format!("llama-{}.log", backend.to_lowercase())))?;
 
-    let child = Command::new(exe)
-        .arg("-m").arg(model)
-        .arg("--mmproj").arg(mmproj)
+    let mut command = Command::new(exe);
+    command.arg("-m").arg(model);
+    if let Some(mmproj) = mmproj {
+        command.arg("--mmproj").arg(mmproj);
+    }
+    let child = command
         .args(["--embeddings", "--pooling", "mean"])
-        // The model reads each input in one pass, so -ub must cover the longest input.
-        .args(["-c", "4096", "-b", "4096", "-ub", "4096"])
+        // The model reads each input in one pass, so -ub must cover the longest input. A
+        // passage is at most 1,200 characters, about 1,300 tokens even when it is all digits,
+        // and the server's working memory grows with -ub: 4096 held some 200 MB more.
+        .args(["-c", "2048", "-b", "2048", "-ub", "2048"])
         .args(["-ngl", ngl])
+        // The prompt cache keeps a copy of every input, pictures included, and for an
+        // embedding model it counts them as taking no room, so it is never trimmed and
+        // grows for as long as the server runs. Embeddings never reuse it: turn it off.
+        .args(["--cache-ram", "0"])
         .args(["--host", "127.0.0.1", "--port", &port.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::from(log.try_clone()?))
@@ -112,7 +124,7 @@ fn spawn(
         .with_context(|| format!("failed to launch {}", exe.display()))?;
     kill_with_parent(&child);
     let client = HttpEmbedder::new(&format!("http://127.0.0.1:{port}"));
-    let mut engine = Engine { child, client, backend };
+    let mut engine = Engine { child, client, backend, vision: mmproj.is_some() };
 
     let health = format!("http://127.0.0.1:{port}/health");
     let deadline = Instant::now() + Duration::from_secs(180);

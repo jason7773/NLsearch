@@ -69,14 +69,19 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Returns the running engine, starting it first if needed.
-    pub fn engine(&self) -> anyhow::Result<Arc<Engine>> {
+    /// Returns the running engine, starting it first if needed. With `vision` it can
+    /// embed pictures too; a text-only engine is replaced by one that can.
+    pub fn engine(&self, vision: bool) -> anyhow::Result<Arc<Engine>> {
         let mut slot = self.engine.lock().unwrap();
         self.touch();
         if let Some(engine) = slot.as_ref() {
-            return Ok(engine.clone());
+            if engine.vision || !vision {
+                return Ok(engine.clone());
+            }
+            // Stopped before the new one loads, unless a request is still using it.
+            *slot = None;
         }
-        let engine = Arc::new(Engine::start(&self.runtimes, &self.log_dir)?);
+        let engine = Arc::new(Engine::start(&self.runtimes, &self.log_dir, vision)?);
         *self.backend.lock().unwrap() = engine.backend.to_string();
         *slot = Some(engine.clone());
         Ok(engine)
@@ -315,7 +320,7 @@ fn search(
     let conn = db::open(&state.db_path).map_err(err)?;
     let allowed = search::allowed_files(&conn, &filters.unwrap_or_default()).map_err(err)?;
 
-    let engine = state.engine().map_err(err)?;
+    let engine = state.engine(false).map_err(err)?;
     state.searching.fetch_add(1, Ordering::SeqCst);
     let embedded = engine.embed(&[search::query_input(query)]);
     state.searching.fetch_sub(1, Ordering::SeqCst);
@@ -401,20 +406,52 @@ fn reveal_file(app: AppHandle, path: String) -> CmdResult<()> {
 
 fn show_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        set_background(&w, false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
 }
 
+fn hide_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+        set_background(&w, true);
+    }
+}
+
 fn toggle_window(app: &AppHandle) {
     match app.get_webview_window("main") {
-        Some(w) if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) => {
-            let _ = w.hide();
-        }
+        Some(w) if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) => hide_window(app),
         _ => show_window(app),
     }
 }
+
+/// NLsearch spends most of its time hidden in the tray. While it is, the browser engine
+/// is asked to use as little memory as it can, which lets Windows trim its processes;
+/// showing the window sets it back to normal.
+#[cfg(windows)]
+fn set_background(window: &tauri::WebviewWindow, background: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows::core::Interface;
+
+    let level = if background {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+    } else {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+    };
+    let _ = window.with_webview(move |webview| unsafe {
+        // Older WebView2 runtimes do not have the setting; they just keep using what they use.
+        if let Ok(core) = webview.controller().CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_19>()) {
+            let _ = core.SetMemoryUsageTargetLevel(level);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn set_background(_window: &tauri::WebviewWindow, _background: bool) {}
 
 /// Serves `thumb://<file id>-<mtime>`: the small preview stored with an indexed image.
 /// Previews keep result lists light; full-size photos would be decoded on every redraw.
@@ -526,7 +563,9 @@ pub fn run() {
             });
 
             // The window starts hidden (see tauri.conf.json) so a start at sign-in stays in the tray.
-            if !std::env::args().any(|a| a == HIDDEN_ARG) {
+            if std::env::args().any(|a| a == HIDDEN_ARG) {
+                hide_window(app.handle());
+            } else {
                 show_window(app.handle());
             }
 
@@ -580,7 +619,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                hide_window(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
