@@ -63,6 +63,12 @@ pub fn open(path: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE files ADD COLUMN ocr INTEGER NOT NULL DEFAULT 0")?;
     }
 
+    // Files of the folder left out because they are only in the cloud.
+    let has_cloud = conn.prepare("SELECT 1 FROM pragma_table_info('folders') WHERE name = 'cloud'")?.exists([])?;
+    if !has_cloud {
+        conn.execute_batch("ALTER TABLE folders ADD COLUMN cloud INTEGER NOT NULL DEFAULT 0")?;
+    }
+
     build_keyword_index(&mut conn)?;
 
     // Vectors from another model or quantisation are not comparable: drop them.
@@ -135,11 +141,14 @@ fn build_keyword_index(conn: &mut Connection) -> Result<()> {
 /// What the user chose in Settings that changes what gets indexed. Kept in the index
 /// itself, so a portable copy carries it along.
 #[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Rules for `extract::Exclusions`.
     pub exclude: Vec<String>,
     /// Read text in pictures and scanned PDFs.
     pub ocr: bool,
+    /// Download files that are only in the cloud to index them, then free the space again.
+    pub cloud: bool,
 }
 
 impl Settings {

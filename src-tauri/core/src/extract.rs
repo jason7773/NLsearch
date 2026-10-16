@@ -150,6 +150,8 @@ pub struct Candidate {
     pub mtime: i64,
     pub size: u64,
     pub kind: &'static str,
+    /// Only in the cloud (OneDrive and other sync apps): reading it downloads it.
+    pub cloud: bool,
 }
 
 pub struct Item {
@@ -179,9 +181,26 @@ pub fn scan(root: &Path, exclusions: &Exclusions) -> Vec<Candidate> {
                 return None;
             }
             let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
-            Some(Candidate { path: e.into_path(), mtime, size: meta.len(), kind })
+            let cloud = is_cloud_only(&meta);
+            Some(Candidate { path: e.into_path(), mtime, size: meta.len(), kind, cloud })
         })
         .collect()
+}
+
+/// Windows marks a file whose content is not on this PC yet. Placeholders made by
+/// OneDrive and other sync apps carry RECALL_ON_DATA_ACCESS; older ones OFFLINE.
+#[cfg(windows)]
+pub fn is_cloud_only(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x40000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x400000;
+    meta.file_attributes() & (FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
+}
+
+#[cfg(not(windows))]
+pub fn is_cloud_only(_meta: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// Decodes an image upright: cameras store portrait photos rotated, with the turn in EXIF.
@@ -517,7 +536,7 @@ mod tests {
         zip.write_all(b"<w:document><w:p><w:r><w:t>Dear reader</w:t></w:r></w:p></w:document>").unwrap();
         zip.finish().unwrap();
 
-        let candidate = |path: &Path| Candidate { path: path.into(), mtime: 0, size: 1, kind: "text" };
+        let candidate = |path: &Path| Candidate { path: path.into(), mtime: 0, size: 1, kind: "text", cloud: false };
         let (items, thumb) = extract(&candidate(&txt), None).unwrap();
         assert_eq!(texts(&items), ["plain words"]);
         assert!(thumb.is_none());
@@ -536,7 +555,7 @@ mod tests {
         let path = dir.path().join("big.png");
         image::RgbImage::from_pixel(1200, 600, image::Rgb([200, 30, 30])).save(&path).unwrap();
 
-        let (items, thumb) = extract(&Candidate { path: path.clone(), mtime: 0, size: 1, kind: "image" }, None).unwrap();
+        let (items, thumb) = extract(&Candidate { path: path.clone(), mtime: 0, size: 1, kind: "image", cloud: false }, None).unwrap();
         assert_eq!(texts(&items), ["big.png"]);
         assert!(matches!(items[0].input, Input::Image(_)));
         let preview = image::load_from_memory(&thumb.unwrap()).unwrap();
@@ -549,11 +568,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pdf = dir.path().join("broken.pdf");
         fs::write(&pdf, "not a pdf at all").unwrap();
-        assert!(extract(&Candidate { path: pdf, mtime: 0, size: 1, kind: "pdf" }, None).is_err());
+        assert!(extract(&Candidate { path: pdf, mtime: 0, size: 1, kind: "pdf", cloud: false }, None).is_err());
 
         let img = dir.path().join("broken.jpg");
         fs::write(&img, "not an image").unwrap();
-        assert!(extract(&Candidate { path: img, mtime: 0, size: 1, kind: "image" }, None).is_err());
+        assert!(extract(&Candidate { path: img, mtime: 0, size: 1, kind: "image", cloud: false }, None).is_err());
     }
 
     #[test]
@@ -617,7 +636,7 @@ mod tests {
             ("ppt/slides/slide10.xml", "<p:sld><a:p><a:r><a:t>Tenth</a:t></a:r></a:p></p:sld>"),
             ("ppt/slides/slide1.xml", r#"<p:sld><a:p><a:r><a:t xml:space="preserve">Hello </a:t></a:r><a:r><a:t>world</a:t></a:r></a:p></p:sld>"#),
         ]);
-        let candidate = |path: &Path| Candidate { path: path.into(), mtime: 0, size: 1, kind: "text" };
+        let candidate = |path: &Path| Candidate { path: path.into(), mtime: 0, size: 1, kind: "text", cloud: false };
 
         let (items, _) = extract(&candidate(&xlsx), None).unwrap();
         assert_eq!(texts(&items), ["Rent\t1200\nElectricity\tQ&A"]);
@@ -644,7 +663,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("screenshot.png");
         image::RgbImage::from_pixel(50, 40, image::Rgb([255, 255, 255])).save(&path).unwrap();
-        let candidate = Candidate { path, mtime: 0, size: 1, kind: "image" };
+        let candidate = Candidate { path, mtime: 0, size: 1, kind: "image", cloud: false };
 
         let (items, _) = extract(&candidate, Some(&FakeOcr("Invoice number 2024-0042 total due"))).unwrap();
         assert_eq!(texts(&items), ["screenshot.png", "Invoice number 2024-0042 total due"]);

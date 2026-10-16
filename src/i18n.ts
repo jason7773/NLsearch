@@ -156,6 +156,8 @@ const en = {
   "folder.notIndexed": "Not indexed yet",
   "folder.toGo": "{files} indexed · {n} to go",
   "folder.missing": "{files} indexed · {n} not indexed",
+  "folder.cloud_one": "{files} · {n} only in the cloud",
+  "folder.cloud_other": "{files} · {n} only in the cloud",
   "add.started": "Indexing {names}. You can search while it finishes.",
   "add.notFolder": "Only folders can be added.",
   "add.covered": "Already searched as part of {folder}",
@@ -213,6 +215,12 @@ const en = {
     "Windows has no OCR language installed. Add one under Windows Settings › Time & language › Language & region, in the language's options.",
   "set.ocrStarted": "Pictures and PDFs are being read again for text.",
   "set.ocrStopped": "Pictures and PDFs are being indexed again without OCR.",
+  "set.cloud": "Cloud files (OneDrive)",
+  "set.cloudText":
+    "Files kept only in the cloud are left out, because reading one downloads it. What was indexed before a file went back to the cloud stays searchable. When on, files are downloaded one at a time, never on a metered connection, and each goes back to the cloud once read, unless you set it to always keep on this device.",
+  "set.cloudOn": "Download cloud files to index them, then free up the space again",
+  "set.cloudStarted": "Cloud files are being downloaded one at a time to be indexed.",
+  "set.cloudStopped": "Files only in the cloud are left out from now on.",
   "set.exclude": "Skipped folders and files",
   "set.excludeText":
     "One per line: a name such as Archive, a pattern such as *.tmp, or a full path. Hidden folders and program folders such as node_modules are always skipped.",
@@ -388,6 +396,8 @@ const zh: Record<Key, string> = {
   "folder.notIndexed": "尚未建立索引",
   "folder.toGo": "已完成 {files} · 還剩 {n} 個",
   "folder.missing": "已完成 {files} · {n} 個尚未建立索引",
+  "folder.cloud_one": "{files} · {n} 個僅在雲端",
+  "folder.cloud_other": "{files} · {n} 個僅在雲端",
   "add.started": "正在為 {names} 建立索引，完成前也可以先搜尋。",
   "add.notFolder": "只能加入資料夾。",
   "add.covered": "已經包含在 {folder} 裡搜尋了",
@@ -442,6 +452,12 @@ const zh: Record<Key, string> = {
   "set.ocrMissing": "Windows 尚未安裝 OCR 語言。請到 Windows 設定 › 時間與語言 › 語言與地區，在語言選項中加裝。",
   "set.ocrStarted": "正在重新讀取圖片和 PDF 裡的文字。",
   "set.ocrStopped": "正在不使用 OCR 重新建立圖片和 PDF 的索引。",
+  "set.cloud": "雲端檔案（OneDrive）",
+  "set.cloudText":
+    "只存在雲端的檔案預設略過，因為一讀取就會下載。檔案變回僅雲端之前建立的索引會保留，仍然搜得到。開啟後會一次下載一個檔案，使用計量付費網路時不下載；讀完就恢復成僅雲端，設成「永遠保留在此裝置上」的檔案除外。",
+  "set.cloudOn": "下載雲端檔案來建立索引，完成後恢復成僅雲端",
+  "set.cloudStarted": "正在逐一下載雲端檔案來建立索引。",
+  "set.cloudStopped": "之後會略過只存在雲端的檔案。",
   "set.exclude": "略過的資料夾和檔案",
   "set.excludeText":
     "每行一個：名稱（例如 Archive）、樣式（例如 *.tmp）或完整路徑。隱藏資料夾和 node_modules 這類程式資料夾一律會略過。",
