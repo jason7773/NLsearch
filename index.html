@@ -9,67 +9,97 @@
   </head>
 
   <body>
+    <!-- Soft colour behind the glass style; the paper style hides it. -->
+    <div id="ambient" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
     <header>
+      <div class="topbar">
+        <div class="brand"><b>NL</b>search</div>
+        <span class="grow"></span>
+        <button id="folders-toggle" class="pill" data-i18n-title="folders.title">
+          <span class="icon" data-icon="folder"></span><span data-i18n="folders">Folders</span><span id="folder-count" hidden></span>
+        </button>
+        <button id="settings-open" class="subtle" data-i18n-title="settings.title"><span class="icon" data-icon="gear"></span></button>
+        <button id="about-open" class="subtle" data-i18n-title="about.title"><span class="icon" data-icon="info"></span></button>
+      </div>
       <div class="searchbox">
         <span class="icon" data-icon="search"></span>
-        <input id="query" type="text" placeholder="Search files" autocomplete="off" spellcheck="false" autofocus />
+        <input id="query" type="text" data-i18n-placeholder="search.placeholder" autocomplete="off" spellcheck="false" autofocus />
         <span id="spinner" class="spinner" hidden></span>
-        <button id="clear" class="subtle" title="Clear" hidden><span class="icon" data-icon="close"></span></button>
+        <button id="clear" class="subtle" data-i18n-title="search.clear" hidden><span class="icon" data-icon="close"></span></button>
       </div>
       <div class="toolbar">
-        <div id="filters" class="tabs" role="tablist">
-          <button data-filter="all" class="active" role="tab">All</button>
-          <button data-filter="docs" role="tab">Documents</button>
-          <button data-filter="images" role="tab">Images</button>
+        <div id="filters" class="segmented" role="tablist">
+          <button data-filter="all" class="active" role="tab" data-i18n="tab.all">All</button>
+          <button data-filter="docs" role="tab" data-i18n="tab.docs">Documents</button>
+          <button data-filter="images" role="tab" data-i18n="tab.images">Images</button>
         </div>
+        <span id="similar" class="chip" hidden>
+          <span class="icon" data-icon="sparkle"></span><span id="similar-text"></span>
+          <button id="similar-clear" class="subtle" data-i18n-title="similar.clear"><span class="icon" data-icon="close"></span></button>
+        </span>
         <span id="meta"></span>
-        <button id="filters-toggle" class="subtle" title="Filter by date, folder or file type">
-          <span class="icon" data-icon="filter"></span>
-        </button>
-        <button id="folders-toggle" title="Choose which folders are searched">
-          <span class="icon" data-icon="folder"></span>Folders<span id="folder-count" hidden></span>
-        </button>
-        <button id="settings-open" class="subtle" title="Settings"><span class="icon" data-icon="gear"></span></button>
+        <select id="sort" data-i18n-title="sort.title">
+          <option value="relevance" data-i18n="sort.relevance">Best match</option>
+          <option value="newest" data-i18n="sort.newest">Newest first</option>
+          <option value="oldest" data-i18n="sort.oldest">Oldest first</option>
+        </select>
+        <button id="filters-toggle" class="subtle" data-i18n-title="filters.title"><span class="icon" data-icon="filter"></span></button>
+        <button id="preview-toggle" class="subtle" data-i18n-title="preview.toggle"><span class="icon" data-icon="panel"></span></button>
       </div>
       <div id="filterbar" hidden>
-        <select id="filter-date" title="Last modified">
-          <option value="">Any time</option>
-          <option value="1">Past day</option>
-          <option value="7">Past week</option>
-          <option value="31">Past month</option>
-          <option value="365">Past year</option>
+        <select id="filter-date">
+          <option value="" data-i18n="filter.anytime">Any time</option>
+          <option value="1" data-i18n="filter.day">Past day</option>
+          <option value="7" data-i18n="filter.week">Past week</option>
+          <option value="31" data-i18n="filter.month">Past month</option>
+          <option value="365" data-i18n="filter.year">Past year</option>
         </select>
-        <select id="filter-folder" title="Folder">
-          <option value="">All folders</option>
-        </select>
-        <select id="filter-type" title="File type">
-          <option value="">All file types</option>
-        </select>
-        <button id="filters-clear" class="subtle">Clear</button>
+        <select id="filter-folder"></select>
+        <select id="filter-type"></select>
+        <button id="filters-clear" class="subtle wide" data-i18n="filter.clear">Clear</button>
       </div>
     </header>
 
-    <div id="banner" hidden>
-      <span class="icon" data-icon="info"></span>
-      <span id="banner-text"></span>
-      <button id="banner-action"></button>
+    <div id="notices">
+      <div id="banner" class="notice" hidden>
+        <span class="icon" data-icon="info"></span>
+        <span id="banner-text" class="notice-text"></span>
+        <button id="banner-action"></button>
+      </div>
+      <div id="tip" class="notice" hidden>
+        <span class="icon" data-icon="bolt"></span>
+        <span class="notice-text" data-i18n="tip.gpu"></span>
+        <button id="tip-action" class="accent"></button>
+        <button id="tip-dismiss" class="subtle" data-i18n-title="tip.later"><span class="icon" data-icon="close"></span></button>
+      </div>
+      <div id="update" class="notice" hidden>
+        <span class="icon" data-icon="download"></span>
+        <span id="update-text" class="notice-text"></span>
+        <button id="update-action" class="accent"></button>
+        <button id="update-dismiss" class="subtle" data-i18n-title="tip.later"><span class="icon" data-icon="close"></span></button>
+      </div>
     </div>
 
-    <div id="tip" hidden>
-      <span class="icon" data-icon="bolt"></span>
-      <span id="tip-text">An NVIDIA graphics card was found. GPU support makes indexing several times faster.</span>
-      <button id="tip-action" class="accent"></button>
-      <button id="tip-dismiss" class="subtle" title="Not now"><span class="icon" data-icon="close"></span></button>
+    <div id="content">
+      <main id="results" class="panel"></main>
+      <aside id="preview" class="panel">
+        <div id="preview-empty" class="preview-empty" data-i18n="preview.empty"></div>
+        <div id="preview-body" hidden>
+          <div id="preview-media"></div>
+          <h2 id="preview-name"></h2>
+          <div id="preview-meta"></div>
+          <div class="preview-actions">
+            <button id="pv-open" class="accent"><span class="icon" data-icon="open"></span><span data-i18n="action.open"></span></button>
+            <button id="pv-reveal"><span class="icon" data-icon="folder"></span><span data-i18n="action.reveal"></span></button>
+            <button id="pv-similar"><span class="icon" data-icon="sparkle"></span><span data-i18n="action.similar"></span></button>
+            <button id="pv-copy-path" class="subtle" data-i18n-title="action.copyPath"><span class="icon" data-icon="link"></span></button>
+            <button id="pv-copy-text" class="subtle" data-i18n-title="action.copyText"><span class="icon" data-icon="copy"></span></button>
+          </div>
+          <div id="preview-text"></div>
+        </div>
+      </aside>
     </div>
-
-    <div id="update" class="notice" hidden>
-      <span class="icon" data-icon="download"></span>
-      <span id="update-text"></span>
-      <button id="update-action" class="accent"></button>
-      <button id="update-dismiss" class="subtle" title="Not now"><span class="icon" data-icon="close"></span></button>
-    </div>
-
-    <main id="results"></main>
 
     <footer>
       <div id="progress"><div id="progress-fill"></div></div>
@@ -77,81 +107,106 @@
       <span id="status"></span>
       <span id="backend" hidden></span>
       <span class="hints">
-        <kbd>Enter</kbd> Open <kbd>Ctrl</kbd><kbd>Enter</kbd> Show in folder <kbd>Esc</kbd> Hide
+        <kbd>Enter</kbd> <span data-i18n="hint.open"></span> <kbd>Ctrl</kbd><kbd>Enter</kbd> <span data-i18n="hint.reveal"></span>
+        <kbd>Esc</kbd> <span data-i18n="hint.hide"></span>
       </span>
-      <button id="about-open" class="subtle" title="About NLsearch"><span class="icon" data-icon="info"></span></button>
     </footer>
 
     <dialog id="about">
       <h2 id="about-name">NLsearch</h2>
       <p id="about-version" class="about-version"></p>
-      <p>Find documents and pictures on this computer by what they contain. Everything runs locally; no file leaves your device.</p>
+      <p data-i18n="about.text"></p>
       <dl>
-        <dt>Model</dt>
-        <dd>EmbeddingGemma 2 (8-bit), by Google DeepMind</dd>
-        <dt>Running on</dt>
+        <dt data-i18n="about.model"></dt>
+        <dd data-i18n="about.modelName"></dd>
+        <dt data-i18n="about.runningOn"></dt>
         <dd id="about-engine"></dd>
-        <dt>Index</dt>
+        <dt data-i18n="about.index"></dt>
         <dd id="about-index"></dd>
-        <dt>License</dt>
-        <dd>MIT. See LICENSE</dd>
+        <dt data-i18n="about.license"></dt>
+        <dd data-i18n="about.licenseText"></dd>
       </dl>
       <div class="dialog-actions">
-        <button id="about-close" class="accent">Close</button>
+        <button id="about-close" class="accent" data-i18n="close"></button>
       </div>
     </dialog>
 
     <dialog id="settings">
-      <h2>Settings</h2>
+      <h2 data-i18n="settings.title"></h2>
 
       <section>
-        <h3>Appearance</h3>
-        <p>Follow Windows, or always use a light or dark look.</p>
-        <div id="theme" class="segmented" role="radiogroup">
-          <button data-theme="system" role="radio">System</button>
-          <button data-theme="light" role="radio">Light</button>
-          <button data-theme="dark" role="radio">Dark</button>
+        <h3 data-i18n="set.appearance"></h3>
+        <p data-i18n="set.appearanceText"></p>
+        <div class="setting-row">
+          <div id="style" class="segmented" role="radiogroup">
+            <button data-style="glass" role="radio"><span class="swatch glass"></span><span data-i18n="set.glass"></span></button>
+            <button data-style="paper" role="radio"><span class="swatch paper"></span><span data-i18n="set.paper"></span></button>
+          </div>
+          <div id="theme" class="segmented" role="radiogroup">
+            <button data-theme="system" role="radio" data-i18n="set.system"></button>
+            <button data-theme="light" role="radio" data-i18n="set.light"></button>
+            <button data-theme="dark" role="radio" data-i18n="set.dark"></button>
+          </div>
         </div>
       </section>
 
       <section>
-        <h3>Graphics acceleration</h3>
+        <h3 data-i18n="set.language"></h3>
+        <p data-i18n="set.languageText"></p>
+        <select id="language">
+          <option value="system" data-i18n="set.languageSystem"></option>
+          <option value="en">English</option>
+          <option value="zh-TW">繁體中文</option>
+        </select>
+      </section>
+
+      <section>
+        <h3 data-i18n="set.history"></h3>
+        <p data-i18n="set.historyText"></p>
+        <label class="check"><input id="history-keep" type="checkbox" /> <span data-i18n="set.historyKeep"></span></label>
+        <div class="section-actions">
+          <button id="history-clear" data-i18n="set.historyClear"></button>
+        </div>
+      </section>
+
+      <section>
+        <h3 data-i18n="set.gpu"></h3>
         <p id="gpu-state"></p>
         <button id="gpu-action" class="accent" hidden></button>
       </section>
 
       <section>
-        <h3>Search model</h3>
+        <h3 data-i18n="set.model"></h3>
         <p id="model-state"></p>
         <button id="model-action" class="accent" hidden></button>
       </section>
 
       <section>
-        <h3>Start-up</h3>
-        <label class="check"><input id="autostart" type="checkbox" /> Start NLsearch in the tray when you sign in</label>
+        <h3 data-i18n="set.startup"></h3>
+        <label class="check"><input id="autostart" type="checkbox" /> <span data-i18n="set.autostart"></span></label>
       </section>
 
       <section>
-        <h3>Text in pictures (OCR)</h3>
+        <h3 data-i18n="set.ocr"></h3>
         <p id="ocr-state"></p>
-        <label class="check"><input id="ocr" type="checkbox" /> Read text in pictures and scanned PDFs</label>
+        <label class="check"><input id="ocr" type="checkbox" /> <span data-i18n="set.ocrOn"></span></label>
       </section>
 
       <section>
-        <h3>Skipped folders and files</h3>
-        <p>One per line: a name such as <code>Archive</code>, a pattern such as <code>*.tmp</code>, or a full path. Hidden folders and program folders such as <code>node_modules</code> are always skipped.</p>
+        <h3 data-i18n="set.exclude"></h3>
+        <p data-i18n="set.excludeText"></p>
         <textarea id="exclude" rows="4" spellcheck="false" placeholder="Archive&#10;*.tmp&#10;D:\Photos\Old"></textarea>
         <div class="section-actions">
-          <button id="exclude-save">Save</button>
+          <button id="exclude-save" data-i18n="save"></button>
         </div>
       </section>
 
       <section>
-        <h3>Updates</h3>
+        <h3 data-i18n="set.updates"></h3>
         <p id="update-state"></p>
-        <label class="check"><input id="update-auto" type="checkbox" /> Check for updates automatically</label>
+        <label class="check"><input id="update-auto" type="checkbox" /> <span data-i18n="set.updateAuto"></span></label>
         <div class="section-actions">
-          <button id="update-check">Check now</button>
+          <button id="update-check" data-i18n="set.updateCheck"></button>
           <button id="update-install" class="accent" hidden></button>
         </div>
       </section>
@@ -160,34 +215,34 @@
         <div class="bar"><div id="download-fill"></div></div>
         <div class="download-row">
           <span id="download-text"></span>
-          <button id="download-cancel">Cancel</button>
+          <button id="download-cancel" data-i18n="cancel"></button>
         </div>
       </div>
       <p id="download-error" class="error" hidden></p>
 
       <div class="dialog-actions">
-        <button id="settings-close">Close</button>
+        <button id="settings-close" data-i18n="close"></button>
       </div>
     </dialog>
 
     <div id="backdrop" hidden></div>
     <aside id="drawer" aria-hidden="true">
       <div class="drawer-head">
-        <h2>Folders</h2>
-        <button id="drawer-close" class="subtle" title="Close"><span class="icon" data-icon="close"></span></button>
+        <h2 data-i18n="folders"></h2>
+        <button id="drawer-close" class="subtle" data-i18n-title="drawer.close"><span class="icon" data-icon="close"></span></button>
       </div>
-      <p class="drawer-intro">NLsearch looks through these folders. Files stay on this computer.</p>
+      <p class="drawer-intro" data-i18n="drawer.intro"></p>
       <ul id="folders"></ul>
       <div class="drawer-actions">
-        <button id="add-folder" class="accent"><span class="icon" data-icon="plus"></span>Add folder</button>
-        <button id="reindex" title="Look for new, changed and deleted files"><span class="icon" data-icon="refresh"></span>Rescan</button>
+        <button id="add-folder" class="accent"><span class="icon" data-icon="plus"></span><span data-i18n="drawer.add"></span></button>
+        <button id="reindex" data-i18n-title="drawer.rescanTitle"><span class="icon" data-icon="refresh"></span><span data-i18n="drawer.rescan"></span></button>
       </div>
     </aside>
 
     <div id="drop" hidden>
       <div class="drop-card">
         <span class="icon" data-icon="folder"></span>
-        Drop to add folder
+        <span data-i18n="drop.hint"></span>
       </div>
     </div>
 

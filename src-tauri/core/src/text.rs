@@ -155,6 +155,39 @@ pub fn chunk_text(text: &str) -> Vec<String> {
     out
 }
 
+/// Joins consecutive passages from `chunk_text` back into running text, dropping the part
+/// each one repeats from the one before.
+pub fn join_passages<'a>(passages: impl IntoIterator<Item = &'a str>) -> String {
+    let mut out = String::new();
+    for next in passages {
+        if out.is_empty() {
+            out.push_str(next);
+            continue;
+        }
+        // The longest start of `next` that `out` already ends with. Every character weighs
+        // at least one unit, so the overlap is never longer than OVERLAP_UNITS characters
+        // (plus the whitespace trimmed off the end of the passage before).
+        let starts: Vec<usize> = next.char_indices().map(|(i, _)| i).chain([next.len()]).collect();
+        let reach = starts.len().min(OVERLAP_UNITS + 2);
+        let shared = (1..reach)
+            .rev()
+            .map(|k| starts[k])
+            .find(|&end| {
+                let head = next[..end].trim_end();
+                head.chars().count() >= 8 && out.ends_with(head)
+            })
+            .map(|end| next[..end].trim_end().len());
+        match shared {
+            Some(len) => out.push_str(&next[len..]),
+            None => {
+                out.push('\n');
+                out.push_str(next);
+            }
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Keyword index
 
@@ -290,6 +323,20 @@ mod tests {
         let block = format!("{}「好。」{}", "字".repeat(300), "後".repeat(200));
         let first = &chunk_text(&block)[0];
         assert!(first.ends_with("。」"), "{first}");
+    }
+
+    #[test]
+    fn passages_join_back_into_the_text() {
+        let words: String = (0..900).map(|i| format!("word{i} ")).collect();
+        let joined = join_passages(chunk_text(&words).iter().map(String::as_str));
+        assert_eq!(joined, words.trim());
+
+        let text: String = (0..80).map(|i| format!("這是第{i}句測試用的話，用來確認切段會停在句號之後。")).collect();
+        let joined = join_passages(chunk_text(&text).iter().map(String::as_str));
+        assert_eq!(joined, text);
+
+        // Passages that do not overlap stay apart.
+        assert_eq!(join_passages(["first part of it", "something else here"]), "first part of it\nsomething else here");
     }
 
     #[test]

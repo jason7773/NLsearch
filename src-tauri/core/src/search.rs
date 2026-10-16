@@ -29,6 +29,12 @@ pub struct Hit {
     pub modified: i64,
 }
 
+/// Semantic candidates for a list of `limit` files: enough that files with many matching
+/// passages do not crowd the rest out when more results are asked for.
+pub fn candidates(limit: usize) -> usize {
+    SEMANTIC_CANDIDATES.max(limit * 4)
+}
+
 /// Narrows a search beyond the kind tabs. Empty fields do not filter.
 #[derive(Default, Deserialize)]
 pub struct Filters {
@@ -177,6 +183,91 @@ pub fn rank(
     Ok(hits)
 }
 
+/// Files whose content is closest to the file at `path` as a whole, best first, leaving
+/// that file out. Empty when the file is not indexed.
+pub fn similar(
+    conn: &Connection,
+    cache: &db::VecCache,
+    path: &str,
+    filter: &str,
+    allowed: Option<&HashSet<i64>>,
+    limit: usize,
+) -> Result<Vec<Hit>> {
+    let file_id: Option<i64> = conn
+        .query_row("SELECT id FROM files WHERE path = ?1", params![path], |r| r.get(0))
+        .ok();
+    let Some(file_id) = file_id else { return Ok(Vec::new()) };
+    let Some(vector) = cache.file_vector(file_id) else { return Ok(Vec::new()) };
+    let semantic = cache.top_k(&vector, candidates(limit), |kind, file| {
+        file != file_id && allows(filter, kind) && allowed.map_or(true, |a| a.contains(&file))
+    });
+    // An empty query leaves out the keyword side.
+    rank(conn, &semantic, "", filter, allowed, limit)
+}
+
+/// Text of one file, page by page, for the preview pane.
+#[derive(Serialize)]
+pub struct Preview {
+    pub kind: String,
+    pub sections: Vec<Section>,
+    /// Text was left out to keep the preview light.
+    pub truncated: bool,
+}
+
+#[derive(Serialize)]
+pub struct Section {
+    /// Page or slide number, where the file has them.
+    pub page: Option<i64>,
+    pub text: String,
+}
+
+/// How much text a preview carries at most.
+pub const PREVIEW_CHARS: usize = 40_000;
+
+/// The indexed text of the file at `path`, with the overlap between passages removed.
+pub fn preview(conn: &Connection, path: &str) -> Result<Preview> {
+    let (file_id, kind): (i64, String) =
+        conn.query_row("SELECT id, kind FROM files WHERE path = ?1", params![path], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut stmt = conn.prepare("SELECT page, text FROM chunks WHERE file_id = ?1 ORDER BY id")?;
+    let rows = stmt.query_map(params![file_id], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?)))?;
+
+    // Consecutive passages of the same page belong together.
+    let mut pages: Vec<(Option<i64>, Vec<String>)> = Vec::new();
+    for row in rows {
+        let (page, text) = row?;
+        // A picture's own passage is just its name.
+        if kind == "image" && text == name {
+            continue;
+        }
+        match pages.last_mut() {
+            Some((p, texts)) if *p == page => texts.push(text),
+            _ => pages.push((page, vec![text])),
+        }
+    }
+
+    let mut sections = Vec::new();
+    let mut budget = PREVIEW_CHARS;
+    let mut truncated = false;
+    for (page, texts) in pages {
+        if budget == 0 {
+            truncated = true;
+            break;
+        }
+        let text = text::join_passages(texts.iter().map(String::as_str));
+        let count = text.chars().count();
+        let text = if count > budget {
+            truncated = true;
+            text.chars().take(budget).collect()
+        } else {
+            text
+        };
+        budget = budget.saturating_sub(count);
+        sections.push(Section { page, text });
+    }
+    Ok(Preview { kind, sections, truncated })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +385,36 @@ mod tests {
         let cache = VecCache::load(&conn).unwrap();
         assert!(names(&search(&conn, &cache, "deadline", "all")).contains(&"taxes.md"));
         assert!(search(&conn, &cache, "receipts", "all").iter().all(|h| !h.keyword));
+    }
+
+    #[test]
+    fn finds_similar_files_and_previews_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("cake.txt"), "Chocolate cake recipe with butter and sugar").unwrap();
+        std::fs::write(docs.join("brownies.txt"), "Chocolate brownies recipe with butter").unwrap();
+        std::fs::write(docs.join("taxes.md"), "Annual tax return checklist and receipts").unwrap();
+        let long: String = (0..900).map(|i| format!("word{i} ")).collect();
+        std::fs::write(docs.join("long.txt"), &long).unwrap();
+
+        let conn = db::open(&dir.path().join("index.db")).unwrap();
+        conn.execute("INSERT INTO folders (path) VALUES (?1)", params![docs.to_string_lossy()]).unwrap();
+        let mut cache = VecCache::default();
+        index_all(&conn, &FakeEmbedder::new(), &mut cache);
+
+        let cake = docs.join("cake.txt").to_string_lossy().into_owned();
+        let hits = similar(&conn, &cache, &cake, "all", None, 10).unwrap();
+        assert_eq!(hits[0].name, "brownies.txt");
+        assert!(hits.iter().all(|h| h.name != "cake.txt"));
+        assert!(similar(&conn, &cache, "/not/indexed.txt", "all", None, 10).unwrap().is_empty());
+
+        let p = preview(&conn, &docs.join("long.txt").to_string_lossy()).unwrap();
+        assert_eq!(p.kind, "text");
+        assert_eq!(p.sections.len(), 1);
+        assert_eq!(p.sections[0].text, long.trim());
+        assert!(!p.truncated);
+        assert!(preview(&conn, "/not/indexed.txt").is_err());
     }
 
     #[test]

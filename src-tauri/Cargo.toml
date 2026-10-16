@@ -36,6 +36,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
 notify = "8"
 tauri-plugin-autostart = "2"
+tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Media_Ocr", "Graphics_Imaging", "Storage", "Storage_Streams", "Data_Pdf", "Security_Cryptography", "Globalization"] }

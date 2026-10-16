@@ -38,7 +38,12 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 - 🔤 **Text in pictures** (optional): screenshots and scanned PDFs found by their words, with Windows' built-in OCR
 - 🚫 **Skip rules** for folders and files you never want searched
 - ⏸️ **Stop and resume** indexing at any time, with a warning while a folder is incomplete
-- 🌗 **Light and dark mode**, following Windows or set in **Settings**
+- 🪟 **Two looks**, frosted glass or paper, each light or dark, following Windows or set in **Settings**
+- 🀄 **English and Traditional Chinese** interface, following the Windows language
+- 👁️ **Preview pane** with the file's text, opened at the passage that matched, or the full picture
+- ✨ **Find similar**: any result leads to the files most like it
+- 🕘 **Recent searches and files** on the start screen, kept only on this computer
+- ↕️ **Sort** by best match or date, and **show more** than the first 48 results
 - ⌨️ **Global hotkey** (`Ctrl+Shift+Space`), a tray icon, and an optional start at sign-in
 - 🔒 **Private and read-only**: files are never changed, moved or uploaded
 - 📦 **Portable**: runs from a folder with no installation
@@ -89,7 +94,8 @@ Only an up-to-date NVIDIA driver is needed. The CUDA toolkit is not.
 | `↑` `↓` | Move the selection |
 | `Enter` | Open the selected file |
 | `Ctrl+Enter` | Show the file in Explorer |
-| `Esc` | Hide the window |
+| `Ctrl+Shift+C` | Copy the selected file's path |
+| `Esc` | Leave *Find similar*, or hide the window |
 
 - **Tabs** switch between All, Documents and Images.
 - **Exact match** marks results that contain every word you typed.
@@ -294,7 +300,7 @@ The index is stored at `%APPDATA%\com.jason7773.nlsearch\index.db`. Deleting tha
 - No live file watching: changes are picked up on startup or with **Rescan**.
 - Scanned PDFs without a text layer are skipped, and there is no OCR for screenshots.
 - Audio, video and source code are not indexed.
-- Results are limited to the top 48 matches.
+- Up to 480 results per search (48 at a time).
 - Text files over 5 MB, images over 50 MB and PDFs over 100 MB are skipped.
 - Tested with libraries of a few hundred files. Very large libraries (hundreds of thousands of
   items) will use a lot of memory, because every vector is held in RAM.
