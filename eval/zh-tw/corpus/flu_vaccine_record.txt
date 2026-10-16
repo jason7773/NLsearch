@@ -1,0 +1,6 @@
+Immunization Record
+Vaccine: Influenza (seasonal flu shot), quadrivalent
+Date administered: October 12, 2023
+Location: CVS Pharmacy, Cambridge, MA
+Lot number: FL2309A
+Next dose recommended: fall 2024

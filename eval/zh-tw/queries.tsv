@@ -1,0 +1,92 @@
+# category	query	relevant files (; separated)
+keyword	凱米颱風	颱風停班停課公告.txt
+keyword	智齒	牙醫看診紀錄.txt
+keyword	Hausman 檢定	計量經濟_固定效果模型筆記.md
+keyword	光世代	搬家待辦清單.txt
+keyword	晶華酒店	婚禮籌備.md
+keyword	ICOCA	日本關西自由行_行程.md
+keyword	脂肪肝	健康檢查報告_2024.txt
+keyword	龜背芋	我家裏的植物照顧.txt
+keyword	戚風蛋糕	戚風蛋糕失敗筆記.txt
+keyword	紅線停車	停車罰單.txt
+natural	大安區那間房子押金要付多少	2023租屋合約_大安區.txt
+natural	台南租的房子可以養貓嗎	租賃契約_台南東區_2025.txt
+natural	夏天電費最貴那期繳了多少錢	台電電費通知_2024-07.txt
+natural	五月信用卡最低要繳多少	國泰信用卡帳單_2024年5月.txt
+natural	健檢有哪些數字不正常	健康檢查報告_2024.txt
+natural	拔牙之後多久可以拆線	牙醫看診紀錄.txt
+natural	家裡的貓什麼時候要再打疫苗	貓咪疫苗紀錄_麻糬.txt
+natural	上次換機油是騎到幾公里	機車保養紀錄.txt
+natural	開車撞到人保險最多賠多少	汽車保險_明台產險.txt
+natural	去年報稅退了多少錢	綜合所得稅申報_2023年度.txt
+natural	十月薪水實際拿到多少	勞保勞退_薪資單_2024年10月.txt
+natural	新版搜尋功能什麼時候上線	會議記錄_產品週會_2024-10-07.md
+natural	第四季廣告費要怎麼分配	會議記錄_預算審查_2024-09.md
+natural	去京都要看哪些景點	日本關西自由行_行程.md
+natural	怎麼去太魯閣玩	花蓮三天兩夜.md
+natural	牛肉要燉多久才會軟	紅燒牛肉麵食譜.txt
+natural	蛋糕烤完為什麼會塌下去	戚風蛋糕失敗筆記.txt
+natural	怎麼決定用固定效果還是隨機效果	計量經濟_固定效果模型筆記.md
+natural	下雨對共享單車使用量有什麼影響	小論文_YouBike使用量分析_摘要.md
+natural	我的英文檢定成績	履歷_中文版.md
+natural	搬家要去哪些地方改地址	搬家待辦清單.txt
+natural	喜宴一桌多少錢	婚禮籌備.md
+natural	手機換螢幕花了多少	手機維修單_iPhone13.txt
+natural	結婚可以請幾天假	公司員工手冊_請假規定.md
+natural	大樓哪天會停水	社區管委會公告_停水.txt
+natural	增肌一天要吃多少蛋白質	健身菜單.txt
+natural	網購耳機的退款會退到哪裡	退貨申請_蝦皮.txt
+natural	違規停車罰單可以在哪裡繳	停車罰單.txt
+natural	環島每天要騎多遠	單車環島計畫.md
+natural	看完心理學那本書的心得	讀書心得_被討厭的勇氣.md
+synonym	腳踏車環島	單車環島計畫.md
+synonym	摩托車保養	機車保養紀錄.txt
+synonym	空調安裝報價	冷氣安裝估價單.txt
+synonym	身體檢查結果	健康檢查報告_2024.txt
+synonym	毛小孩打預防針	貓咪疫苗紀錄_麻糬.txt
+synonym	薪水條	勞保勞退_薪資單_2024年10月.txt
+synonym	行動電話修理	手機維修單_iPhone13.txt
+synonym	計程車收據	上海出差报销单.txt
+synonym	伙食費補助	勞保勞退_薪資單_2024年10月.txt
+synonym	颱風假	颱風停班停課公告.txt
+simplified	租房合同 押金	2023租屋合約_大安區.txt;租賃契約_台南東區_2025.txt;apartment_lease_Boston_2022.txt
+simplified	体检报告 胆固醇	健康檢查報告_2024.txt
+simplified	信用卡账单	國泰信用卡帳單_2024年5月.txt
+simplified	日本关西旅游行程	日本關西自由行_行程.md
+simplified	计量经济 固定效应	計量經濟_固定效果模型筆記.md
+simplified	台风停课	颱風停班停課公告.txt
+simplified	请假规定 病假	公司員工手冊_請假規定.md
+simplified	电费 夏月	台電電費通知_2024-07.txt
+to_simplified	上海出差報銷	上海出差报销单.txt
+to_simplified	高鐵二等座	上海出差报销单.txt
+to_simplified	住宿費 酒店	上海出差报销单.txt
+crosslingual	波士頓租屋押金	apartment_lease_Boston_2022.txt
+crosslingual	流感疫苗接種紀錄	flu_vaccine_record.txt
+crosslingual	rental contract pet policy	2023租屋合約_大安區.txt;租賃契約_台南東區_2025.txt;apartment_lease_Boston_2022.txt
+crosslingual	electricity bill in summer	台電電費通知_2024-07.txt
+crosslingual	beef noodle soup recipe	紅燒牛肉麵食譜.txt
+crosslingual	wedding banquet cost	婚禮籌備.md
+crosslingual	panel data fixed effects	計量經濟_固定效果模型筆記.md
+crosslingual	Kyoto trip itinerary	日本關西自由行_行程.md
+crosslingual	dental wisdom tooth extraction	牙醫看診紀錄.txt
+crosslingual	car insurance premium	汽車保險_明台產險.txt
+variant	家裡植物澆水	我家裏的植物照顧.txt
+variant	臺北停班停課	颱風停班停課公告.txt
+variant	臺灣大學經濟系	履歷_中文版.md
+variant	台北自來水	自來水費_2024.txt
+long	居家服務每小時補助多少錢	研究計畫書_長照政策.md
+long	長照研究的樣本數	研究計畫書_長照政策.md
+long	課題分離是什麼意思	讀書心得_被討厭的勇氣.md
+long	客服回應時間縮短多少	年度工作回顧_2024.md
+long	團隊離職率	年度工作回顧_2024.md
+long	自卑感和自卑情結的差別	讀書心得_被討厭的勇氣.md
+long	喘息服務一年幾天	研究計畫書_長照政策.md
+filename	戴森吸塵器保固	保固卡_戴森吸塵器.txt
+filename	蝦皮退貨	退貨申請_蝦皮.txt
+filename	國泰信用卡	國泰信用卡帳單_2024年5月.txt
+filename	明台產險	汽車保險_明台產險.txt
+number	2024年3月電費	台電電費通知_2024-03.txt
+number	BR132	日本關西自由行_行程.md
+number	ABC-1234	停車罰單.txt
+number	38,500	冷氣安裝估價單.txt
+number	900032001234567	貓咪疫苗紀錄_麻糬.txt
