@@ -180,7 +180,7 @@ fn main() -> Result<()> {
         "query_embed_ms": percentiles(&t_qembed),
         "vector_scan_ms": percentiles(&t_scan),
         "rank_ms": percentiles(&t_rank),
-        "vector_cache_bytes": cache.ids.len() * DIM * 4,
+        "vector_cache_bytes": cache_bytes(cache.ids.len()),
         "db_bytes": db_bytes,
         "peak_rss_bytes": peak_rss(),
     });
@@ -192,7 +192,7 @@ fn main() -> Result<()> {
         let p = &speed[key];
         println!("- {label}: p50 {:.2} ms, p95 {:.2} ms", p["p50"].as_f64().unwrap(), p["p95"].as_f64().unwrap());
     }
-    println!("- vector cache {:.1} KB, database {:.1} KB, peak RSS {}", cache.ids.len() as f64 * DIM as f64 * 4.0 / 1024.0, db_bytes as f64 / 1024.0,
+    println!("- vector cache {:.1} KB, database {:.1} KB, peak RSS {}", cache_bytes(cache.ids.len()) as f64 / 1024.0, db_bytes as f64 / 1024.0,
         peak_rss().map_or("n/a".into(), |b| format!("{:.1} MB", b as f64 / 1048576.0)));
 
     let mut scale = serde_json::Value::Null;
@@ -275,7 +275,12 @@ fn scale_scan(n: usize) -> (serde_json::Value, usize) {
         std::hint::black_box(cache.top_k(&v, candidates(LIMIT), |_, _| true));
         times.push(t.elapsed());
     }
-    (percentiles(&times), n * DIM * 4)
+    (percentiles(&times), cache_bytes(n))
+}
+
+/// Memory the vector cache uses for `n` passages: one byte per dimension plus a scale.
+fn cache_bytes(n: usize) -> usize {
+    n * (DIM + 4)
 }
 
 #[cfg(target_os = "linux")]
