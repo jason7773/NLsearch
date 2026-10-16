@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db;
 use crate::embed::Input;
@@ -25,6 +25,48 @@ pub struct Hit {
     pub keyword: bool,
     /// Key of the stored preview, for images: pass it to the `thumb` protocol.
     pub thumb: Option<String>,
+    /// Last modified, in seconds since 1970.
+    pub modified: i64,
+}
+
+/// Narrows a search beyond the kind tabs. Empty fields do not filter.
+#[derive(Default, Deserialize)]
+pub struct Filters {
+    /// Only files modified at or after this time, in seconds since 1970.
+    pub since: Option<i64>,
+    /// Only files in this indexed folder.
+    pub folder: Option<i64>,
+    /// Only files with one of these extensions, lower case and without the dot.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+}
+
+/// The ids of the files that pass `filters`, or None when nothing is filtered.
+pub fn allowed_files(conn: &Connection, filters: &Filters) -> Result<Option<HashSet<i64>>> {
+    if filters.since.is_none() && filters.folder.is_none() && filters.extensions.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare("SELECT id, folder_id, mtime, path FROM files")?;
+    let mut rows = stmt.query([])?;
+    let mut allowed = HashSet::new();
+    while let Some(row) = rows.next()? {
+        let (folder, mtime): (i64, i64) = (row.get(1)?, row.get(2)?);
+        if filters.folder.is_some_and(|f| f != folder) || filters.since.is_some_and(|s| mtime < s) {
+            continue;
+        }
+        if !filters.extensions.is_empty() {
+            let path: String = row.get(3)?;
+            let ext = std::path::Path::new(&path)
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if !filters.extensions.contains(&ext) {
+                continue;
+            }
+        }
+        allowed.insert(row.get(0)?);
+    }
+    Ok(Some(allowed))
 }
 
 /// What is sent to the model for a query.
@@ -43,12 +85,14 @@ pub fn allows(filter: &str, kind: u8) -> bool {
 }
 
 /// Fuses `semantic` (chunk id and cosine, best first) with a keyword search for
-/// `query`, and returns the best passage of each of the top `limit` files.
+/// `query`, and returns the best passage of each of the top `limit` files. `allowed`
+/// limits the keyword side to those files, as `semantic` already is.
 pub fn rank(
     conn: &Connection,
     semantic: &[(i64, f32)],
     query: &str,
     filter: &str,
+    allowed: Option<&HashSet<i64>>,
     limit: usize,
 ) -> Result<Vec<Hit>> {
     // Exact-match side: every query word must appear in the passage.
@@ -56,18 +100,23 @@ pub fn rank(
     let mut keyword: Vec<i64> = Vec::new();
     if !fts_query.is_empty() {
         let mut stmt = conn.prepare(
-            "SELECT c.id, f.kind FROM chunks_fts
+            "SELECT c.id, f.kind, f.id FROM chunks_fts
              JOIN chunks c ON c.id = chunks_fts.rowid
              JOIN files f ON f.id = c.file_id
-             WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT 100",
+             WHERE chunks_fts MATCH ?1 ORDER BY bm25(chunks_fts) LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![fts_query], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        // Filters throw many matches away, so look further down the list.
+        let depth = if allowed.is_some() { 2000 } else { 100 };
+        let rows = stmt.query_map(params![fts_query, depth], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+        })?;
         for row in rows {
-            let (id, kind) = row?;
-            if allows(filter, db::kind_code(&kind)) {
+            let (id, kind, file_id) = row?;
+            if allows(filter, db::kind_code(&kind)) && allowed.map_or(true, |a| a.contains(&file_id)) {
                 keyword.push(id);
             }
         }
+        keyword.truncate(100);
     }
 
     // Reciprocal rank fusion of the two rankings.
@@ -115,14 +164,15 @@ pub fn rank(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let snippet = if kind == "image" {
+        // An image's own passage is just its name; text read from it by OCR is shown.
+        let snippet = if kind == "image" && text == name {
             String::new()
         } else {
             text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(260).collect()
         };
         // The modification time makes the key change when the file does, so previews can be cached.
         let thumb = (kind == "image").then(|| format!("{file_id}-{mtime}"));
-        hits.push(Hit { path, name, kind, page, snippet, score, keyword, thumb });
+        hits.push(Hit { path, name, kind, page, snippet, score, keyword, thumb, modified: mtime });
     }
     Ok(hits)
 }
@@ -132,7 +182,7 @@ mod tests {
     use super::*;
     use crate::db::VecCache;
     use crate::embed::Embedder;
-    use crate::extract::{extract, scan};
+    use crate::extract::{extract, scan, Exclusions};
     use crate::index::{embed_items, plan_folder, tidy, write_file};
     use crate::testing::FakeEmbedder;
     use std::path::Path;
@@ -149,11 +199,13 @@ mod tests {
             .unwrap();
         let mut indexed = 0;
         for (folder_id, path) in folders {
-            for file in plan_folder(conn, folder_id, scan(Path::new(&path))).unwrap() {
-                let (items, thumb) = extract(&file).unwrap_or_default();
+            let found = scan(Path::new(&path), &Exclusions::default());
+            for file in plan_folder(conn, folder_id, found, false).unwrap() {
+                let (items, thumb) = extract(&file, None).unwrap_or_default();
                 let rows = embed_items(embedder, items, || true).unwrap();
-                for (id, vec) in write_file(conn, folder_id, &file, rows, thumb.as_deref()).unwrap() {
-                    cache.push(id, db::kind_code(file.kind), &vec);
+                let (file_id, added) = write_file(conn, folder_id, &file, rows, thumb.as_deref(), false).unwrap();
+                for (id, vec) in added {
+                    cache.push(id, file_id, db::kind_code(file.kind), &vec);
                 }
                 indexed += 1;
             }
@@ -162,9 +214,20 @@ mod tests {
     }
 
     fn search(conn: &Connection, cache: &VecCache, query: &str, filter: &str) -> Vec<Hit> {
+        search_filtered(conn, cache, query, filter, &Filters::default())
+    }
+
+    fn search_filtered(conn: &Connection, cache: &VecCache, query: &str, filter: &str, filters: &Filters) -> Vec<Hit> {
         let qvec = FakeEmbedder::new().embed(&[query_input(query)]).unwrap().remove(0);
-        let semantic = cache.top_k(&qvec, SEMANTIC_CANDIDATES, |k| allows(filter, k));
-        rank(conn, &semantic, query, filter, 10).unwrap()
+        let allowed = allowed_files(conn, filters).unwrap();
+        let semantic = cache.top_k(&qvec, SEMANTIC_CANDIDATES, |k, f| {
+            allows(filter, k) && allowed.as_ref().map_or(true, |a| a.contains(&f))
+        });
+        rank(conn, &semantic, query, filter, allowed.as_ref(), 10).unwrap()
+    }
+
+    fn hits_have_dates(hits: &[Hit]) -> bool {
+        !hits.is_empty() && hits.iter().all(|h| h.modified > 0)
     }
 
     fn names(hits: &[Hit]) -> Vec<&str> {
@@ -206,9 +269,20 @@ mod tests {
         assert!(images[0].thumb.is_some());
         assert!(names(&search(&conn, &cache, "sea", "docs")).iter().all(|n| *n != "sea.png"));
 
+        // Extension, folder and date filters, on both the semantic and keyword sides.
+        let md_only = Filters { extensions: vec!["md".into()], ..Default::default() };
+        assert_eq!(names(&search_filtered(&conn, &cache, "chocolate recipe", "all", &md_only)), ["taxes.md"]);
+        assert!(search_filtered(&conn, &cache, "颱風", "all", &md_only).iter().all(|h| h.name == "taxes.md" && !h.keyword));
+        let future = Filters { since: Some(i64::MAX), ..Default::default() };
+        assert!(search_filtered(&conn, &cache, "chocolate", "all", &future).is_empty());
+        let other_folder = Filters { folder: Some(999), ..Default::default() };
+        assert!(search_filtered(&conn, &cache, "chocolate", "all", &other_folder).is_empty());
+        assert!(hits_have_dates(&search(&conn, &cache, "chocolate", "all")));
+
         // The cache built while indexing matches what a reload from disk gives.
         let loaded = VecCache::load(&conn).unwrap();
         assert_eq!(loaded.ids, cache.ids);
+        assert_eq!(loaded.files, cache.files);
         assert_eq!(loaded.data, cache.data);
 
         // A second pass skips unchanged files and picks up an edit.
@@ -233,11 +307,11 @@ mod tests {
             let rows = (0..3)
                 .map(|p| crate::index::Row { page: Some(p), text: format!("file {f} page {p}"), vec: FakeEmbedder::vector("x") })
                 .collect();
-            for (id, _) in write_file(&conn, 1, &file, rows, None).unwrap() {
+            for (id, _) in write_file(&conn, 1, &file, rows, None, false).unwrap().1 {
                 semantic.push((id, 0.9));
             }
         }
-        let hits = rank(&conn, &semantic, "", "all", 3).unwrap();
+        let hits = rank(&conn, &semantic, "", "all", None, 3).unwrap();
         assert_eq!(names(&hits), ["0.txt", "1.txt", "2.txt"]);
         assert_eq!(hits[0].page, Some(0));
     }

@@ -30,6 +30,20 @@ pub fn is_cjk(c: char) -> bool {
     )
 }
 
+/// Joins words recognised by OCR into a line. Windows OCR reports each Chinese or
+/// Japanese character as a word of its own; those are put back together without spaces.
+pub fn join_words(words: &[String]) -> String {
+    let mut line = String::new();
+    for word in words.iter().filter(|w| !w.is_empty()) {
+        let joins_previous = line.chars().last().is_some_and(is_cjk) && word.chars().next().is_some_and(is_cjk);
+        if !line.is_empty() && !joins_previous {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    line
+}
+
 // ---------------------------------------------------------------------------
 // Decoding
 
@@ -191,6 +205,13 @@ pub fn fts_query(query: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn joins_ocr_words() {
+        let words = |ws: &[&str]| ws.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(join_words(&words(&["今", "天", "是", "2024", "年", "Total:", "NT$", "300"])), "今天是 2024 年 Total: NT$ 300");
+        assert_eq!(join_words(&words(&[])), "");
+    }
 
     #[test]
     fn splits_cjk_into_single_tokens() {

@@ -35,19 +35,27 @@ pub fn tidy(conn: &Connection) -> Result<()> {
 /// Compares what is on disk in a folder with what the index holds. Files that changed
 /// or disappeared are removed from the index; the new and changed ones are returned to
 /// be indexed, and recorded as the folder's pending count.
-pub fn plan_folder(conn: &Connection, folder_id: i64, found: Vec<Candidate>) -> Result<Vec<Candidate>> {
-    let mut known: HashMap<String, (i64, i64, u64)> = conn
-        .prepare("SELECT path, id, mtime, size FROM files WHERE folder_id = ?1")?
+pub fn plan_folder(
+    conn: &Connection,
+    folder_id: i64,
+    found: Vec<Candidate>,
+    ocr: bool,
+) -> Result<Vec<Candidate>> {
+    let mut known: HashMap<String, (i64, i64, u64, bool)> = conn
+        .prepare("SELECT path, id, mtime, size, ocr FROM files WHERE folder_id = ?1")?
         .query_map(params![folder_id], |r| {
-            Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u64)))
+            Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u64, r.get(4)?)))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut todo = Vec::new();
     for file in found {
         let key = file.path.to_string_lossy().into_owned();
+        // Pictures and PDFs are read again when OCR is turned on or off.
+        let ocr_matters = file.kind != "text";
         match known.remove(&key) {
-            Some((_, mtime, size)) if mtime == file.mtime && size == file.size => {}
+            Some((_, mtime, size, read_with_ocr))
+                if mtime == file.mtime && size == file.size && (!ocr_matters || read_with_ocr == ocr) => {}
             Some((id, ..)) => {
                 db::delete_file(conn, id)?;
                 todo.push(file);
@@ -55,7 +63,7 @@ pub fn plan_folder(conn: &Connection, folder_id: i64, found: Vec<Candidate>) -> 
             None => todo.push(file),
         }
     }
-    // Whatever is left no longer exists on disk.
+    // Whatever is left no longer exists on disk, or is now excluded.
     for (id, ..) in known.into_values() {
         db::delete_file(conn, id)?;
     }
@@ -99,20 +107,22 @@ pub fn embed_items(
 }
 
 /// Writes one file with its passages and preview in one transaction, and returns the
-/// new chunk ids with their vectors. Files with nothing indexable are still recorded
-/// so they are not retried every pass.
+/// file's id with the new chunk ids and their vectors. Files with nothing indexable are
+/// still recorded so they are not retried every pass. `ocr` records whether the file
+/// was read with OCR.
 pub fn write_file(
     conn: &Connection,
     folder_id: i64,
     file: &Candidate,
     rows: Vec<Row>,
     thumb: Option<&[u8]>,
-) -> Result<Vec<(i64, Vec<f32>)>> {
+    ocr: bool,
+) -> Result<(i64, Vec<(i64, Vec<f32>)>)> {
     let mut added = Vec::new();
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT OR REPLACE INTO files (folder_id, path, mtime, size, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![folder_id, file.path.to_string_lossy(), file.mtime, file.size as i64, file.kind],
+        "INSERT OR REPLACE INTO files (folder_id, path, mtime, size, kind, ocr) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![folder_id, file.path.to_string_lossy(), file.mtime, file.size as i64, file.kind, ocr],
     )?;
     let file_id = tx.last_insert_rowid();
     for row in rows {
@@ -133,7 +143,7 @@ pub fn write_file(
         params![folder_id],
     )?;
     tx.commit()?;
-    Ok(added)
+    Ok((file_id, added))
 }
 
 #[cfg(test)]
@@ -182,17 +192,41 @@ mod tests {
         let vec = FakeEmbedder::vector("x");
         for (path, mtime) in [("/docs/same.txt", 1), ("/docs/changed.txt", 1), ("/docs/gone.txt", 1)] {
             let row = Row { page: None, text: "x".into(), vec: vec.clone() };
-            write_file(&conn, 1, &candidate(path, mtime), vec![row], None).unwrap();
+            write_file(&conn, 1, &candidate(path, mtime), vec![row], None, false).unwrap();
         }
 
         let found = vec![candidate("/docs/same.txt", 1), candidate("/docs/changed.txt", 2), candidate("/docs/new.txt", 1)];
-        let todo = plan_folder(&conn, 1, found).unwrap();
+        let todo = plan_folder(&conn, 1, found, false).unwrap();
         let mut paths: Vec<_> = todo.iter().map(|c| c.path.to_string_lossy().into_owned()).collect();
         paths.sort();
         assert_eq!(paths, ["/docs/changed.txt", "/docs/new.txt"]);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 1);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM chunks"), 1);
         assert_eq!(count(&conn, "SELECT pending FROM folders WHERE id = 1"), 2);
+    }
+
+    #[test]
+    fn turning_ocr_on_or_off_redoes_pictures_and_pdfs_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open(&dir.path().join("index.db")).unwrap();
+        conn.execute("INSERT INTO folders (id, path) VALUES (1, '/docs')", []).unwrap();
+        let files = [("/docs/a.txt", "text"), ("/docs/b.png", "image"), ("/docs/c.pdf", "pdf")];
+        let found = || files.map(|(p, kind)| Candidate { path: p.into(), mtime: 1, size: 10, kind }).into();
+        for file in plan_folder(&conn, 1, found(), false).unwrap() {
+            write_file(&conn, 1, &file, vec![], None, false).unwrap();
+        }
+        assert!(plan_folder(&conn, 1, found(), false).unwrap().is_empty());
+        let redo: Vec<_> = plan_folder(&conn, 1, found(), true).unwrap().into_iter().map(|c| c.kind).collect();
+        assert_eq!(redo, ["image", "pdf"]);
+
+        let mut settings = db::Settings::load(&conn).unwrap();
+        assert!(!settings.ocr && settings.exclude.is_empty());
+        settings.ocr = true;
+        settings.exclude = vec!["*.tmp".into()];
+        settings.save(&conn).unwrap();
+        let loaded = db::Settings::load(&conn).unwrap();
+        assert!(loaded.ocr);
+        assert_eq!(loaded.exclude, ["*.tmp"]);
     }
 
     #[test]
