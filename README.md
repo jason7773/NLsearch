@@ -38,6 +38,7 @@ available and the CPU otherwise. Inspired by [DigUp](https://github.com/ARahim3/
 - 🔤 **Text in pictures** (optional): screenshots and scanned PDFs found by their words, with Windows' built-in OCR
 - 🚫 **Skip rules** for folders and files you never want searched
 - ⏸️ **Stop and resume** indexing at any time, with a warning while a folder is incomplete
+- 🌗 **Light and dark mode**, following Windows or set in **Settings**
 - ⌨️ **Global hotkey** (`Ctrl+Shift+Space`), a tray icon, and an optional start at sign-in
 - 🔒 **Private and read-only**: files are never changed, moved or uploaded
 - 📦 **Portable**: runs from a folder with no installation
