@@ -31,6 +31,8 @@ interface Folder {
   files: number;
   /** Files still waiting to be indexed; null until the folder's first scan. */
   pending: number | null;
+  /** Files left out because they are only in the cloud. */
+  cloud: number;
 }
 
 interface Status {
@@ -754,6 +756,7 @@ function folderState(folder: Folder) {
   if (folder.pending > 0) {
     return el("div", "count warn", t(indexing ? "folder.toGo" : "folder.missing", { files, n: folder.pending }));
   }
+  if (folder.cloud > 0) return el("div", "count", tn("folder.cloud", folder.cloud, { files }));
   return el("div", "count", files);
 }
 
@@ -1292,6 +1295,7 @@ $("filters-clear").addEventListener("click", () => {
 interface IndexSettings {
   exclude: string[];
   ocr: boolean;
+  cloud: boolean;
   ocr_languages: string[];
   ocr_available: boolean;
 }
@@ -1304,6 +1308,7 @@ async function loadIndexSettings() {
   const ocr = $<HTMLInputElement>("ocr");
   ocr.checked = indexSettings.ocr;
   ocr.disabled = !indexSettings.ocr_available && !indexSettings.ocr;
+  $<HTMLInputElement>("cloud").checked = indexSettings.cloud;
   $("ocr-state").textContent = indexSettings.ocr_available
     ? t("set.ocrAvailable", { languages: indexSettings.ocr_languages.join(", ") })
     : t("set.ocrMissing");
@@ -1316,9 +1321,9 @@ async function loadIndexSettings() {
 
 async function saveIndexSettings(changes: Partial<IndexSettings>, message: string) {
   if (!indexSettings) return;
-  const next = { exclude: indexSettings.exclude, ocr: indexSettings.ocr, ...changes };
+  const next = { exclude: indexSettings.exclude, ocr: indexSettings.ocr, cloud: indexSettings.cloud, ...changes };
   try {
-    await invoke("save_settings", { settings: { exclude: next.exclude, ocr: next.ocr } });
+    await invoke("save_settings", { settings: { exclude: next.exclude, ocr: next.ocr, cloud: next.cloud } });
     Object.assign(indexSettings, next);
     toast(message);
     refreshStatus();
@@ -1337,6 +1342,10 @@ $("exclude-save").addEventListener("click", () => {
 $("ocr").addEventListener("change", (e) => {
   const on = (e.target as HTMLInputElement).checked;
   saveIndexSettings({ ocr: on }, on ? t("set.ocrStarted") : t("set.ocrStopped"));
+});
+$("cloud").addEventListener("change", (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  saveIndexSettings({ cloud: on }, on ? t("set.cloudStarted") : t("set.cloudStopped"));
 });
 $("autostart").addEventListener("change", async (e) => {
   const on = (e.target as HTMLInputElement).checked;

@@ -309,7 +309,7 @@ mod tests {
         let mut indexed = 0;
         for (folder_id, path) in folders {
             let found = scan(Path::new(&path), &Exclusions::default());
-            for file in plan_folder(conn, folder_id, found, false).unwrap() {
+            for file in plan_folder(conn, folder_id, found, false, false).unwrap() {
                 let (items, thumb) = extract(&file, None).unwrap_or_default();
                 let rows = embed_items(embedder, items, || true).unwrap();
                 let (file_id, added) = write_file(conn, folder_id, &file, rows, thumb.as_deref(), false).unwrap();
@@ -442,7 +442,7 @@ mod tests {
         conn.execute("INSERT INTO folders (id, path) VALUES (1, '/d')", []).unwrap();
         let mut semantic = Vec::new();
         for f in 0..5 {
-            let file = crate::extract::Candidate { path: format!("/d/{f}.txt").into(), mtime: 0, size: 1, kind: "text" };
+            let file = crate::extract::Candidate { path: format!("/d/{f}.txt").into(), mtime: 0, size: 1, kind: "text", cloud: false };
             let rows = (0..3)
                 .map(|p| crate::index::Row { page: Some(p), text: format!("file {f} page {p}"), vec: FakeEmbedder::vector("x") })
                 .collect();
